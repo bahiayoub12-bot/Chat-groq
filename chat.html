@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Groq Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#07090f;--sidebar-bg:#0b0e17;--surface:#0f1320;--surface2:#151a28;--surface3:#1c2235;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.13);
+  --accent:#5b8ef0;--accent2:#7c6af7;--accent-glow:rgba(91,142,240,0.2);
+  --green:#3ecf8e;--red:#f87171;--text:#e8ecf4;--muted:#7a85a0;--dim:#3d4560;
+}
+html{height:100%;}
+body{height:100%;font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--text);display:flex;overflow:hidden;}
+
+/* SIDEBAR */
+#sidebar{width:268px;min-width:268px;background:var(--sidebar-bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%;transition:transform 0.28s ease;z-index:100;}
+.sb-top{padding:14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.brand{display:flex;align-items:center;gap:9px;margin-bottom:11px;}
+.brand-logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:500;color:#fff;flex-shrink:0;}
+.brand-name{font-size:0.95rem;font-weight:700;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.new-btn{width:100%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;padding:9px;color:#fff;font-family:'Tajawal',sans-serif;font-size:0.85rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:opacity 0.2s;}
+.new-btn:hover{opacity:0.85;}
+.sb-history{flex:1;overflow-y:auto;padding:10px 8px;}
+.sb-history::-webkit-scrollbar{width:3px;}
+.sb-history::-webkit-scrollbar-thumb{background:var(--border2);}
+.sb-label{font-size:0.63rem;color:var(--dim);font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;padding:4px 8px 8px;}
+.h-item{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-bottom:2px;transition:background 0.15s;border:1px solid transparent;}
+.h-item:hover{background:var(--surface2);}
+.h-item.active{background:var(--surface3);border-color:var(--border2);}
+.h-item-text{flex:1;font-size:0.8rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.h-item.active .h-item-text{color:var(--text);}
+.h-del{background:none;border:none;color:var(--dim);font-size:15px;cursor:pointer;padding:0 3px;line-height:1;border-radius:4px;opacity:0;transition:all 0.15s;}
+.h-item:hover .h-del{opacity:1;}
+.h-del:hover{color:var(--red);}
+.sb-bottom{padding:11px 14px;border-top:1px solid var(--border);flex-shrink:0;}
+.sb-bottom label{display:block;font-size:0.63rem;color:var(--dim);font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;}
+select#modelSel{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:7px;padding:7px 9px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:0.7rem;cursor:pointer;outline:none;}
+select#modelSel:focus{border-color:var(--accent);}
+select#modelSel option{background:var(--surface2);}
+
+/* MAIN */
+#main{flex:1;display:flex;flex-direction:column;height:100%;min-width:0;overflow:hidden;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.topbar-left{display:flex;align-items:center;gap:9px;}
+#menuBtn{display:none;background:none;border:1px solid var(--border2);border-radius:7px;width:30px;height:30px;color:var(--muted);cursor:pointer;font-size:15px;align-items:center;justify-content:center;}
+.top-title{font-size:0.88rem;font-weight:600;}
+.top-sub{font-size:0.63rem;color:var(--dim);font-family:'JetBrains Mono',monospace;}
+.topbar-right{display:flex;align-items:center;gap:7px;}
+.online-badge{display:flex;align-items:center;gap:4px;background:rgba(62,207,142,0.08);border:1px solid rgba(62,207,142,0.2);border-radius:20px;padding:3px 9px;font-size:0.65rem;color:var(--green);font-family:'JetBrains Mono',monospace;}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:blink 2s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.top-btn{background:none;border:1px solid var(--border);border-radius:7px;width:30px;height:30px;color:var(--muted);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+.top-btn:hover{background:var(--surface2);color:var(--text);}
+.dash-btn{background:none;border:1px solid var(--border2);border-radius:7px;padding:4px 10px;color:var(--muted);cursor:pointer;font-size:0.72rem;font-family:'JetBrains Mono',monospace;transition:all 0.15s;}
+.dash-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+/* MESSAGES */
+#msgs{flex:1;overflow-y:auto;padding:22px 18px;display:flex;flex-direction:column;gap:20px;min-height:0;}
+#msgs::-webkit-scrollbar{width:4px;}
+#msgs::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+
+#welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:16px;padding:30px 20px;flex:1;}
+.w-orb{width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 0 50px var(--accent-glow);animation:float 4s ease-in-out infinite;}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.w-title{font-size:1.4rem;font-weight:700;}
+.w-sub{font-size:0.83rem;color:var(--muted);max-width:320px;line-height:1.7;}
+.w-chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;max-width:480px;}
+.w-chip{background:var(--surface2);border:1px solid var(--border2);border-radius:18px;padding:6px 13px;font-size:0.78rem;color:var(--muted);cursor:pointer;font-family:'Tajawal',sans-serif;transition:all 0.2s;}
+.w-chip:hover{background:var(--surface3);border-color:var(--accent);color:var(--accent);}
+.w-fts{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+.w-ft{background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:4px 10px;font-size:0.68rem;color:var(--dim);font-family:'JetBrains Mono',monospace;}
+
+.mrow{display:flex;gap:10px;animation:fadeUp 0.25s ease forwards;max-width:820px;width:100%;margin:0 auto;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.mrow.user{flex-direction:row-reverse;}
+.av{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;align-self:flex-start;margin-top:2px;}
+.av.u{background:linear-gradient(135deg,#2d4fd6,#1a3290);color:#fff;font-size:12px;}
+.av.a{background:linear-gradient(135deg,var(--accent),var(--accent2));font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:500;color:#fff;box-shadow:0 0 12px var(--accent-glow);}
+.bwrap{display:flex;flex-direction:column;max-width:calc(100% - 43px);}
+.bubble{padding:11px 14px;border-radius:12px;font-size:0.86rem;line-height:1.75;word-break:break-word;}
+.mrow.user .bubble{background:var(--surface2);border:1px solid rgba(91,142,240,0.2);border-radius:12px 3px 12px 12px;}
+.mrow.ai .bubble{background:var(--surface);border:1px solid var(--border2);border-radius:3px 12px 12px 12px;}
+
+.file-card{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,0.03);border:1px solid var(--border2);border-radius:8px;padding:8px 11px;margin-bottom:8px;}
+.file-card-icon{font-size:20px;flex-shrink:0;}
+.file-card-info{flex:1;min-width:0;}
+.file-card-name{font-size:0.78rem;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file-card-meta{font-size:0.65rem;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:1px;}
+.file-card-ok{background:rgba(62,207,142,0.1);border:1px solid rgba(62,207,142,0.2);border-radius:5px;padding:2px 6px;font-size:0.6rem;color:var(--green);font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+
+.up-prog{display:flex;align-items:center;gap:7px;background:rgba(91,142,240,0.06);border:1px solid rgba(91,142,240,0.15);border-radius:8px;padding:8px 11px;margin-bottom:8px;font-size:0.76rem;color:var(--accent);}
+.up-spin{width:13px;height:13px;border:2px solid rgba(91,142,240,0.3);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Audio player */
+.audio-player{display:flex;align-items:center;gap:8px;background:rgba(91,142,240,0.06);border:1px solid rgba(91,142,240,0.15);border-radius:8px;padding:8px 12px;margin-top:8px;}
+.play-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:6px;width:28px;height:28px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;}
+.audio-info{font-size:0.72rem;color:var(--muted);font-family:'JetBrains Mono',monospace;}
+
+.bmeta{font-size:0.61rem;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:4px;padding:0 2px;display:flex;gap:7px;align-items:center;}
+.mrow.user .bmeta{justify-content:flex-end;}
+.copy-btn{background:none;border:1px solid var(--border);border-radius:5px;padding:2px 6px;font-size:0.58rem;color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all 0.15s;opacity:0;}
+.mrow:hover .copy-btn{opacity:1;}
+.copy-btn:hover{background:var(--surface2);color:var(--muted);}
+.speak-btn{background:none;border:1px solid var(--border);border-radius:5px;padding:2px 6px;font-size:0.58rem;color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all 0.15s;opacity:0;}
+.mrow:hover .speak-btn{opacity:1;}
+.speak-btn:hover{background:var(--surface2);color:var(--accent);}
+
+.typing-row{display:flex;gap:10px;max-width:820px;width:100%;margin:0 auto;}
+.t-dots{display:flex;align-items:center;gap:4px;padding:12px 16px;background:var(--surface);border:1px solid var(--border2);border-radius:3px 12px 12px 12px;}
+.td{width:5px;height:5px;background:var(--accent);border-radius:50%;animation:tdot 1.2s infinite;}
+.td:nth-child(2){animation-delay:.2s}.td:nth-child(3){animation-delay:.4s}
+@keyframes tdot{0%,60%,100%{transform:translateY(0);opacity:.3}30%{transform:translateY(-5px);opacity:1}}
+
+/* INPUT */
+.input-area{background:var(--surface);border-top:1px solid var(--border);padding:11px 16px 13px;flex-shrink:0;}
+.file-bar{display:none;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:6px 11px;margin-bottom:8px;font-size:0.76rem;color:var(--muted);max-width:820px;margin-left:auto;margin-right:auto;}
+.file-bar.show{display:flex;}
+.file-bar-icon{font-size:17px;flex-shrink:0;}
+.file-bar-info{flex:1;min-width:0;}
+.file-bar-name{font-size:0.78rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file-bar-size{font-size:0.63rem;color:var(--dim);font-family:'JetBrains Mono',monospace;}
+.file-bar-x{background:none;border:none;color:var(--red);font-size:17px;cursor:pointer;line-height:1;flex-shrink:0;}
+.ibox{max-width:820px;margin:0 auto;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:8px 10px;display:flex;align-items:flex-end;gap:6px;transition:border-color 0.2s,box-shadow 0.2s;}
+.ibox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+.iside{display:flex;gap:2px;align-items:flex-end;padding-bottom:1px;}
+.ibtn{width:30px;height:30px;background:none;border:none;border-radius:7px;color:var(--dim);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;}
+.ibtn:hover{background:var(--surface3);color:var(--muted);}
+.ibtn.rec{color:var(--red);animation:recblink 1s infinite;}
+@keyframes recblink{0%,100%{opacity:1}50%{opacity:0.4}}
+textarea#ti{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:'Tajawal',sans-serif;font-size:0.88rem;line-height:1.6;resize:none;min-height:24px;max-height:140px;overflow-y:auto;direction:rtl;padding:2px 0;}
+textarea#ti::placeholder{color:var(--dim);}
+.sbtn{width:35px;height:35px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;cursor:pointer;color:#fff;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px var(--accent-glow);transition:all 0.2s;}
+.sbtn:hover:not(:disabled){transform:scale(1.07);}
+.sbtn:disabled{opacity:0.35;cursor:not-allowed;transform:none;}
+.ihint{max-width:820px;margin:5px auto 0;font-size:0.59rem;color:var(--dim);font-family:'JetBrains Mono',monospace;text-align:center;}
+
+#toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%) translateY(8px);background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.25);color:var(--red);padding:7px 14px;border-radius:8px;font-size:0.74rem;font-family:'JetBrains Mono',monospace;opacity:0;pointer-events:none;transition:all 0.3s;z-index:999;white-space:nowrap;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99;backdrop-filter:blur(2px);}
+#overlay.show{display:block;}
+
+@media(max-width:720px){
+  #sidebar{position:fixed;top:0;right:0;height:100%;transform:translateX(110%);}
+  #sidebar.open{transform:translateX(0);}
+  #menuBtn{display:flex;}
+  #msgs{padding:14px 10px;}
+  .input-area{padding:9px 10px 11px;}
+}
+input[type=file]{display:none;}
+</style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div class="sb-top">
+    <div class="brand">
+      <div class="brand-logo">GQ</div>
+      <div class="brand-name">Groq Chat</div>
+    </div>
+    <button class="new-btn" onclick="newChat()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      محادثة جديدة
+    </button>
+  </div>
+  <div class="sb-history" id="sbHistory"><div class="sb-label">المحادثات</div></div>
+  <div class="sb-bottom">
+    <label for="modelSel">النموذج</label>
+    <select id="modelSel" onchange="onModelChange()">
+      <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+      <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+      <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+      <option value="gemma2-9b-it">gemma2-9b-it</option>
+    </select>
+  </div>
+</aside>
+
+<div id="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button id="menuBtn" onclick="toggleSidebar()">☰</button>
+      <div>
+        <div class="top-title" id="topTitle">محادثة جديدة</div>
+        <div class="top-sub" id="topSub">groq · llama-3.3-70b</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="online-badge"><div class="dot"></div><span>متصل</span></div>
+      <button class="dash-btn" onclick="window.location.href='dashboard.html'">← لوحة التحكم</button>
+      <button class="top-btn" onclick="clearChat()">🗑</button>
+    </div>
+  </div>
+
+  <div id="msgs">
+    <div id="welcome">
+      <div class="w-orb">⚡</div>
+      <div class="w-title">مرحباً في Groq Chat</div>
+      <div class="w-sub">اسأل أي شيء، أرفق ملفاً، أو ابحث في الإنترنت</div>
+      <div class="w-chips">
+        <div class="w-chip" onclick="suggest(this)">ابحث عن أخبار اليوم</div>
+        <div class="w-chip" onclick="suggest(this)">لخص هذا الفيديو: [رابط يوتيوب]</div>
+        <div class="w-chip" onclick="suggest(this)">اكتب كوداً بلغة Python</div>
+        <div class="w-chip" onclick="suggest(this)">ترجم نصاً للإنجليزية</div>
+      </div>
+      <div class="w-fts">
+        <div class="w-ft">🔍 بحث</div>
+        <div class="w-ft">📄 PDF</div>
+        <div class="w-ft">📝 Word</div>
+        <div class="w-ft">📊 Excel</div>
+        <div class="w-ft">🖼 صور</div>
+        <div class="w-ft">▶️ يوتيوب</div>
+        <div class="w-ft">🎙 صوت</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="file-bar" id="fileBar">
+      <span class="file-bar-icon" id="fileIcon">📎</span>
+      <div class="file-bar-info">
+        <div class="file-bar-name" id="fileName">—</div>
+        <div class="file-bar-size" id="fileSize">—</div>
+      </div>
+      <button class="file-bar-x" onclick="removeFile()">×</button>
+    </div>
+    <div class="ibox">
+      <div class="iside">
+        <button class="ibtn" onclick="document.getElementById('fi').click()" title="إرفاق ملف">📎</button>
+        <button class="ibtn" id="micBtn" onclick="toggleMic()" title="ميكروفون">🎤</button>
+      </div>
+      <textarea id="ti" placeholder="اكتب رسالتك، أرفق ملفاً، أو أرسل رابط يوتيوب..." rows="1"
+        onkeydown="handleKey(event)" oninput="resize(this)"></textarea>
+      <button class="sbtn" id="sendBtn" onclick="send()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ihint">Enter للإرسال · Shift+Enter سطر جديد · يدعم PDF·Word·Excel·صور·يوتيوب</div>
+  </div>
+</div>
+
+<div id="overlay" onclick="closeSidebar()"></div>
+<div id="toast"></div>
+<input type="file" id="fi" accept=".pdf,.docx,.xlsx,.xls,.txt,.csv,.jpg,.jpeg,.png,.webp" onchange="onFile(event)">
+
+<script>
+const API    = 'https://ayb-bh1146-chat-groq.hf.space/api/chat';
+const UPLOAD = 'https://ayb-bh1146-chat-groq.hf.space/api/upload';
+const SEARCH = 'https://ayb-bh1146-chat-groq.hf.space/api/search';
+const TTS    = 'https://ayb-bh1146-chat-groq.hf.space/api/tts';
+const YT     = 'https://ayb-bh1146-chat-groq.hf.space/api/youtube';
+
+const SUPABASE_URL = 'https://wseciakcqfwymxbrshju.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_key_placeholder';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const FILE_ICONS = {pdf:'📄',docx:'📝',doc:'📝',xlsx:'📊',xls:'📊',txt:'📃',csv:'📊',jpg:'🖼',jpeg:'🖼',png:'🖼',webp:'🖼'};
+function fIcon(name){const e=name.split('.').pop().toLowerCase();return FILE_ICONS[e]||'📎';}
+function fmtSize(b){if(b<1024)return b+'B';if(b<1048576)return(b/1024).toFixed(1)+'KB';return(b/1048576).toFixed(1)+'MB';}
+function isYT(t){return t.includes('youtube.com/')||t.includes('youtu.be/');}
+
+let sessions=JSON.parse(localStorage.getItem('gq')||'[]');
+let aid=null,busy=false,rec=null,recOn=false,pFile=null;
+
+function gs(id){return sessions.find(s=>s.id===id);}
+function save(){localStorage.setItem('gq',JSON.stringify(sessions));}
+
+async function init(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){window.location.href='index.html';return;}
+  renderSB();
+  if(sessions.length) loadSession(sessions[0].id);
+}
+
+function newChat(){
+  const id='c'+Date.now();
+  sessions.unshift({id,title:'محادثة جديدة',msgs:[],model:'llama-3.3-70b-versatile'});
+  save();loadSession(id);renderSB();closeSidebar();
+}
+
+function loadSession(id){
+  aid=id;const s=gs(id);if(!s)return;
+  document.getElementById('modelSel').value=s.model;
+  document.getElementById('topTitle').textContent=s.title;
+  document.getElementById('topSub').textContent='groq · '+s.model.split('-').slice(0,2).join('-');
+  renderMsgs(s.msgs);renderSB();
+}
+
+function delSession(id,e){
+  e.stopPropagation();sessions=sessions.filter(s=>s.id!==id);save();
+  if(aid===id){aid=null;showWelcome();}renderSB();
+}
+
+function clearChat(){
+  if(!aid)return;gs(aid).msgs=[];gs(aid).title='محادثة جديدة';save();
+  showWelcome();document.getElementById('topTitle').textContent='محادثة جديدة';
+}
+
+function renderSB(){
+  const el=document.getElementById('sbHistory');
+  el.innerHTML='<div class="sb-label">المحادثات</div>';
+  if(!sessions.length){el.innerHTML+='<div style="padding:10px;font-size:0.76rem;color:var(--dim)">لا توجد محادثات</div>';return;}
+  sessions.forEach(s=>{
+    const d=document.createElement('div');
+    d.className='h-item'+(s.id===aid?' active':'');
+    d.innerHTML=`<span style="font-size:12px;opacity:.5;flex-shrink:0">💬</span>
+      <span class="h-item-text">${esc(s.title)}</span>
+      <button class="h-del" onclick="delSession('${s.id}',event)">×</button>`;
+    d.onclick=e=>{if(!e.target.classList.contains('h-del')){loadSession(s.id);closeSidebar();}};
+    el.appendChild(d);
+  });
+}
+
+function showWelcome(){
+  document.getElementById('msgs').innerHTML=`
+    <div id="welcome">
+      <div class="w-orb">⚡</div>
+      <div class="w-title">مرحباً في Groq Chat</div>
+      <div class="w-sub">اسأل أي شيء، أرفق ملفاً، أو ابحث في الإنترنت</div>
+      <div class="w-chips">
+        <div class="w-chip" onclick="suggest(this)">ابحث عن أخبار اليوم</div>
+        <div class="w-chip" onclick="suggest(this)">لخص هذا الفيديو: [رابط يوتيوب]</div>
+        <div class="w-chip" onclick="suggest(this)">اكتب كوداً بلغة Python</div>
+        <div class="w-chip" onclick="suggest(this)">ترجم نصاً للإنجليزية</div>
+      </div>
+      <div class="w-fts">
+        <div class="w-ft">🔍 بحث</div><div class="w-ft">📄 PDF</div>
+        <div class="w-ft">📝 Word</div><div class="w-ft">📊 Excel</div>
+        <div class="w-ft">🖼 صور</div><div class="w-ft">▶️ يوتيوب</div><div class="w-ft">🎙 صوت</div>
+      </div>
+    </div>`;
+}
+
+function renderMsgs(msgs){
+  const el=document.getElementById('msgs');
+  if(!msgs||!msgs.length){showWelcome();return;}
+  el.innerHTML='';msgs.forEach(m=>addBubble(m.role,m.content,m.fi,false));
+  el.scrollTop=el.scrollHeight;
+}
+
+function addBubble(role,text,fi,anim){
+  if(anim===undefined)anim=true;
+  const w=document.getElementById('welcome');if(w)w.remove();
+  const el=document.getElementById('msgs');
+  const isU=role==='user';
+  const t=new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'});
+  const model=document.getElementById('modelSel').value.split('-').slice(0,2).join('-');
+  const d=document.createElement('div');
+  d.className='mrow '+(isU?'user':'ai');
+  if(!anim)d.style.animation='none';
+  let fh='';
+  if(fi){fh=`<div class="file-card"><div class="file-card-icon">${fIcon(fi.name)}</div>
+    <div class="file-card-info"><div class="file-card-name">${esc(fi.name)}</div>
+    <div class="file-card-meta">${fi.size||''}</div></div>
+    <div class="file-card-ok">✓ تمت القراءة</div></div>`;}
+  const speakBtn=!isU?`<button class="speak-btn" onclick="speakText(this)">🔊</button>`:'';
+  d.innerHTML=`
+    <div class="av ${isU?'u':'a'}">${isU?'👤':'GQ'}</div>
+    <div class="bwrap">
+      <div class="bubble">${fh}<span>${esc(text).replace(/\n/g,'<br>')}</span></div>
+      <div class="bmeta"><span>${t}${!isU?' · '+model:''}</span>
+        <button class="copy-btn" onclick="copyMsg(this)">نسخ</button>${speakBtn}
+      </div>
+    </div>`;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
+
+function addTyping(){
+  const w=document.getElementById('welcome');if(w)w.remove();
+  const el=document.getElementById('msgs');
+  const d=document.createElement('div');d.className='typing-row';d.id='typ';
+  d.innerHTML=`<div class="av a">GQ</div><div class="t-dots"><div class="td"></div><div class="td"></div><div class="td"></div></div>`;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
+function removeTyping(){const t=document.getElementById('typ');if(t)t.remove();}
+
+async function send(){
+  if(busy)return;
+  const ti=document.getElementById('ti');
+  const text=ti.value.trim();
+  if(!text&&!pFile)return;
+  if(!aid)newChat();
+  const s=gs(aid);
+  const model=document.getElementById('modelSel').value;
+  const fileObj=pFile;
+  ti.value='';ti.style.height='auto';removeFile();
+  busy=true;document.getElementById('sendBtn').disabled=true;
+
+  let fi=null,fileContext='';
+
+  // يوتيوب
+  if(text&&isYT(text)){
+    addBubble('user',text);addTyping();
+    try{
+      const res=await fetch(YT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:text})});
+      const data=await res.json();
+      fileContext=data.transcript||'';
+    }catch(e){fileContext='';}
+  }
+  // ملف
+  else if(fileObj){
+    fi={name:fileObj.name,size:fmtSize(fileObj.size)};
+    const w=document.getElementById('welcome');if(w)w.remove();
+    const el=document.getElementById('msgs');
+    const upDiv=document.createElement('div');upDiv.id='uploading';upDiv.className='mrow user';
+    upDiv.innerHTML=`<div class="av u">👤</div><div class="bwrap"><div class="bubble">
+      <div class="up-prog"><div class="up-spin"></div> جاري قراءة: ${esc(fileObj.name)}</div>
+      ${text?'<span>'+esc(text)+'</span>':''}
+    </div></div>`;
+    el.appendChild(upDiv);el.scrollTop=el.scrollHeight;
+    try{
+      const fd=new FormData();fd.append('file',fileObj);
+      const r=await fetch(UPLOAD,{method:'POST',body:fd});
+      const data=await r.json();
+      fileContext=data.text||'';
+    }catch(e){fileContext='[تعذّر قراءة الملف]';}
+    const upEl=document.getElementById('uploading');if(upEl)upEl.remove();
+    addBubble('user',text||'اقرأ هذا الملف',fi);
+    addTyping();
+  }
+  // بحث إنترنت
+  else if(text.startsWith('ابحث')||text.startsWith('search')||text.includes('أخبار')){
+    addBubble('user',text);addTyping();
+    try{
+      const res=await fetch(SEARCH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text})});
+      const data=await res.json();
+      fileContext=data.results||'';
+    }catch(e){fileContext='';}
+  }
+  else{
+    addBubble('user',text);addTyping();
+  }
+
+  // بناء الرسالة
+  const userContent=fileContext
+    ?`${text||'اقرأ هذا'}\n\n[معلومات إضافية]\n${fileContext}`
+    :text||'اقرأ هذا الملف';
+
+  s.msgs.push({role:'user',content:userContent,fi});
+  if(s.msgs.length===1){
+    s.title=(text||fileObj?.name||'محادثة').substring(0,30);
+    document.getElementById('topTitle').textContent=s.title;
+  }
+
+  // تحديث الإحصائيات
+  const stats=JSON.parse(localStorage.getItem('gq_stats')||'{"msgs":0,"files":0,"searches":0}');
+  stats.msgs++;
+  if(fileObj)stats.files++;
+  if(fileContext&&!fileObj)stats.searches++;
+  localStorage.setItem('gq_stats',JSON.stringify(stats));
+
+  try{
+    const apiMsgs=s.msgs.map(m=>({role:m.role,content:m.content}));
+    const res=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:apiMsgs,model})});
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    removeTyping();
+    s.msgs.push({role:'assistant',content:data.reply});
+    s.model=model;save();renderSB();
+    addBubble('assistant',data.reply);
+  }catch(err){
+    removeTyping();s.msgs.pop();save();
+    toast('⚠ خطأ: '+err.message);
+  }
+
+  busy=false;document.getElementById('sendBtn').disabled=false;ti.focus();
+}
+
+// TTS
+async function speakText(btn){
+  const text=btn.closest('.bwrap').querySelector('.bubble span').innerText;
+  try{
+    const res=await fetch(TTS,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const audio=new Audio(url);audio.play();
+    toast('🔊 جاري التشغيل...');
+  }catch(e){toast('⚠ خطأ في الصوت');}
+}
+
+function onFile(e){
+  const f=e.target.files[0];if(!f)return;
+  pFile=f;
+  document.getElementById('fileIcon').textContent=fIcon(f.name);
+  document.getElementById('fileName').textContent=f.name;
+  document.getElementById('fileSize').textContent=fmtSize(f.size);
+  document.getElementById('fileBar').classList.add('show');
+  e.target.value='';
+}
+function removeFile(){pFile=null;document.getElementById('fileBar').classList.remove('show');}
+
+function toggleMic(){
+  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('المتصفح لا يدعم الميكروفون');return;}
+  const btn=document.getElementById('micBtn');
+  if(recOn){rec&&rec.stop();recOn=false;btn.classList.remove('rec');return;}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  rec=new SR();rec.lang='ar-SA';rec.interimResults=false;
+  rec.onresult=e=>{const ti=document.getElementById('ti');ti.value+=e.results[0][0].transcript;resize(ti);};
+  rec.onend=()=>{recOn=false;btn.classList.remove('rec');};
+  rec.onerror=()=>{recOn=false;btn.classList.remove('rec');toast('تعذّر الوصول للميكروفون');};
+  rec.start();recOn=true;btn.classList.add('rec');
+}
+
+function suggest(el){const ti=document.getElementById('ti');ti.value=el.textContent;resize(ti);ti.focus();}
+function copyMsg(btn){const t=btn.closest('.bwrap').querySelector('.bubble span');if(t)navigator.clipboard.writeText(t.innerText).then(()=>toast('✓ تم النسخ'));}
+function resize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,140)+'px';}
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+function esc(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function onModelChange(){const v=document.getElementById('modelSel').value;if(aid){gs(aid).model=v;save();}document.getElementById('topSub').textContent='groq · '+v.split('-').slice(0,2).join('-');}
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
+
+init();
+</script>
+</body>
+</html>
