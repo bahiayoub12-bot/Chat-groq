@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة التحكم — Groq Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#05070f;--surface:#0c0f1d;--surface2:#131728;--surface3:#1a1f35;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --accent:#5b8ef0;--accent2:#7c6af7;--accent3:#3ecf8e;--red:#f87171;--amber:#fbbf24;
+  --glow:rgba(91,142,240,0.2);--text:#e8ecf4;--muted:#7a85a0;--dim:#3d4560;
+}
+html,body{height:100%;font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--text);overflow:hidden;display:flex;}
+
+/* SIDEBAR */
+.sidebar{width:240px;min-width:240px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%;}
+.sb-brand{padding:18px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+.sb-logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:#fff;}
+.sb-name{font-size:0.95rem;font-weight:700;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.sb-nav{flex:1;padding:12px 8px;}
+.sb-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;cursor:pointer;margin-bottom:3px;transition:all 0.15s;border:1px solid transparent;font-size:0.88rem;color:var(--muted);}
+.sb-item:hover{background:var(--surface2);color:var(--text);}
+.sb-item.active{background:var(--surface3);border-color:var(--border2);color:var(--text);}
+.sb-item-icon{font-size:16px;flex-shrink:0;}
+.sb-divider{height:1px;background:var(--border);margin:10px 8px;}
+.sb-bottom{padding:12px 16px;border-top:1px solid var(--border);}
+.user-card{display:flex;align-items:center;gap:10px;}
+.user-av{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;flex-shrink:0;}
+.user-email{font-size:0.72rem;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+.logout-btn{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;transition:color 0.15s;}
+.logout-btn:hover{color:var(--red);}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;height:100%;overflow:hidden;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.topbar-title{font-size:1rem;font-weight:700;}
+.topbar-sub{font-size:0.68rem;color:var(--dim);font-family:'JetBrains Mono',monospace;}
+.online{display:flex;align-items:center;gap:5px;background:rgba(62,207,142,0.08);border:1px solid rgba(62,207,142,0.2);border-radius:20px;padding:4px 10px;font-size:0.67rem;color:var(--accent3);font-family:'JetBrains Mono',monospace;}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--accent3);animation:blink 2s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+
+.content{flex:1;overflow-y:auto;padding:24px;}
+.content::-webkit-scrollbar{width:4px;}
+.content::-webkit-scrollbar-thumb{background:var(--border2);}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:18px;transition:all 0.2s;}
+.stat-card:hover{border-color:var(--border2);transform:translateY(-2px);}
+.stat-icon{font-size:22px;margin-bottom:10px;}
+.stat-val{font-size:1.8rem;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1;}
+.stat-label{font-size:0.75rem;color:var(--muted);margin-top:4px;}
+.stat-card.accent .stat-val{color:var(--accent);}
+.stat-card.green .stat-val{color:var(--accent3);}
+.stat-card.purple .stat-val{color:var(--accent2);}
+
+/* CHAT BUTTON */
+.chat-cta{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:20px;transition:all 0.2s;}
+.chat-cta:hover{border-color:var(--accent);box-shadow:0 0 30px var(--glow);}
+.chat-cta-left h2{font-size:1.2rem;font-weight:700;margin-bottom:6px;}
+.chat-cta-left p{font-size:0.83rem;color:var(--muted);line-height:1.6;}
+.start-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:11px;padding:13px 26px;color:#fff;font-family:'Tajawal',sans-serif;font-size:0.92rem;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 16px var(--glow);white-space:nowrap;flex-shrink:0;}
+.start-btn:hover{transform:scale(1.04);}
+
+/* FEATURES GRID */
+.section-title{font-size:0.9rem;font-weight:700;color:var(--muted);margin-bottom:14px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;}
+.caps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px;}
+.cap-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:16px;display:flex;align-items:center;gap:12px;transition:all 0.15s;}
+.cap-card:hover{border-color:var(--border2);background:var(--surface2);}
+.cap-icon{font-size:20px;flex-shrink:0;}
+.cap-name{font-size:0.83rem;font-weight:600;}
+.cap-desc{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+.cap-badge{margin-right:auto;background:rgba(62,207,142,0.1);border:1px solid rgba(62,207,142,0.2);border-radius:5px;padding:2px 7px;font-size:0.62rem;color:var(--accent3);font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+
+/* MOBILE */
+#menuBtn{display:none;background:none;border:1px solid var(--border2);border-radius:7px;width:32px;height:32px;color:var(--muted);cursor:pointer;font-size:16px;align-items:center;justify-content:center;}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99;backdrop-filter:blur(2px);}
+#overlay.show{display:block;}
+
+@media(max-width:720px){
+  .sidebar{position:fixed;top:0;right:0;height:100%;transform:translateX(110%);transition:transform 0.28s ease;z-index:100;}
+  .sidebar.open{transform:translateX(0);}
+  #menuBtn{display:flex;}
+  .content{padding:16px;}
+  .chat-cta{flex-direction:column;}
+}
+</style>
+</head>
+<body>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">GQ</div>
+    <div class="sb-name">Groq Chat</div>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-item active"><span class="sb-item-icon">🏠</span> لوحة التحكم</div>
+    <div class="sb-item" onclick="goChat()"><span class="sb-item-icon">💬</span> البوت</div>
+    <div class="sb-divider"></div>
+    <div class="sb-item"><span class="sb-item-icon">⚙️</span> الإعدادات</div>
+  </nav>
+  <div class="sb-bottom">
+    <div class="user-card">
+      <div class="user-av">👤</div>
+      <div class="user-email" id="userEmail">...</div>
+      <button class="logout-btn" onclick="logout()" title="تسجيل الخروج">⏏</button>
+    </div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="menuBtn" onclick="toggleSidebar()">☰</button>
+      <div>
+        <div class="topbar-title">لوحة التحكم</div>
+        <div class="topbar-sub">مرحباً بك 👋</div>
+      </div>
+    </div>
+    <div class="online"><div class="dot"></div> متصل</div>
+  </div>
+
+  <div class="content">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card accent">
+        <div class="stat-icon">💬</div>
+        <div class="stat-val" id="statMsgs">0</div>
+        <div class="stat-label">رسالة أُرسلت</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">📁</div>
+        <div class="stat-val" id="statFiles">0</div>
+        <div class="stat-label">ملف تم تحليله</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-icon">🔍</div>
+        <div class="stat-val" id="statSearches">0</div>
+        <div class="stat-label">بحث في الإنترنت</div>
+      </div>
+    </div>
+
+    <!-- CTA -->
+    <div class="chat-cta">
+      <div class="chat-cta-left">
+        <h2>ابدأ محادثة جديدة ⚡</h2>
+        <p>اسأل أي شيء، أرفق ملفاً، أو ابحث في الإنترنت</p>
+      </div>
+      <button class="start-btn" onclick="goChat()">فتح البوت ←</button>
+    </div>
+
+    <!-- Capabilities -->
+    <div class="section-title">قدرات البوت</div>
+    <div class="caps-grid">
+      <div class="cap-card"><span class="cap-icon">🔍</span><div><div class="cap-name">بحث إنترنت</div><div class="cap-desc">DuckDuckGo</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">📄</span><div><div class="cap-name">قراءة PDF</div><div class="cap-desc">pdfplumber</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">📝</span><div><div class="cap-name">ملفات Word</div><div class="cap-desc">python-docx</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">📊</span><div><div class="cap-name">تحليل Excel</div><div class="cap-desc">pandas</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">🖼</span><div><div class="cap-name">قراءة الصور</div><div class="cap-desc">Groq Vision</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">▶️</span><div><div class="cap-name">يوتيوب</div><div class="cap-desc">transcript API</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">🎙</span><div><div class="cap-name">صوت</div><div class="cap-desc">gTTS</div></div><span class="cap-badge">فعّال</span></div>
+      <div class="cap-card"><span class="cap-icon">🔤</span><div><div class="cap-name">OCR</div><div class="cap-desc">pytesseract</div></div><span class="cap-badge">فعّال</span></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="overlay" onclick="closeSidebar()"></div>
+
+<script>
+const SUPABASE_URL = 'https://wseciakcqfwymxbrshju.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_key_placeholder';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = 'index.html'; return; }
+  document.getElementById('userEmail').textContent = session.user.email;
+
+  // تحميل الإحصائيات من localStorage
+  const stats = JSON.parse(localStorage.getItem('gq_stats') || '{"msgs":0,"files":0,"searches":0}');
+  document.getElementById('statMsgs').textContent = stats.msgs || 0;
+  document.getElementById('statFiles').textContent = stats.files || 0;
+  document.getElementById('statSearches').textContent = stats.searches || 0;
+}
+
+async function logout() {
+  await sb.auth.signOut();
+  window.location.href = 'index.html';
+}
+
+function goChat() { window.location.href = 'chat.html'; }
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('overlay').classList.toggle('show'); }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('show'); }
+
+init();
+</script>
+</body>
+</html>
