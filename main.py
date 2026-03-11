@@ -337,7 +337,6 @@ async def tts(req: TTSRequest):
 def health():
     return {"status": "ok", "ocr": OCR_AVAILABLE, "edge_tts": EDGE_TTS_AVAILABLE, "platform": "railway"}
 
-app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
 
 @app.get("/test")
 async def test_all():
@@ -413,3 +412,4 @@ async def test_all():
         results["groq_api"] = f"❌ {str(e)[:80]}"
 
     return {"platform": "railway", "tests": results}
+app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
