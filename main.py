@@ -305,8 +305,8 @@ async def youtube(req: YouTubeRequest):
             ytt = YouTubeTranscriptApi()
             fetched = ytt.fetch(video_id)
             transcript_list = [{"text": s.text} for s in fetched.snippets]
-        except Exception as e:
-            print(f"خطأ الترجمة: {e}")  # التغيير الوحيد: e بدلاً من pass
+        except Exception:
+            pass
         # ══ fallback: قراءة صفحة يوتيوب مباشرة ══
         if not transcript_list:
             try:
