@@ -593,7 +593,7 @@ function formatText(t){
     .replace(/\n/g,'<br>');
 }
 
-// ══ TTS مع التحكم في السرعة ══
+// ══ TTS — يرسل النص على دفعات لضمان اكتمال القراءة ══
 async function speakText(btn){
   const text=btn.closest('.bwrap').querySelector('.bubble span').innerText;
   await autoSpeak(text);
@@ -613,44 +613,82 @@ async function fetchWithRetry(url,opts,retries=2){
   }
 }
 
+// تقسيم النص لجمل لضمان اكتمال القراءة
+function splitToChunks(text,maxLen=200){
+  const sentences=text.match(/[^.!?،؟\n]+[.!?،؟\n]*/g)||[text];
+  const chunks=[];
+  let cur='';
+  for(const s of sentences){
+    if((cur+s).length>maxLen&&cur){chunks.push(cur.trim());cur=s;}
+    else cur+=s;
+  }
+  if(cur.trim())chunks.push(cur.trim());
+  return chunks.filter(c=>c.length>0);
+}
+
+async function fetchAudio(text){
+  const res=await fetchWithRetry(TTS,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text,speed:ttsSpeed})
+  });
+  const blob=await res.blob();
+  const url=URL.createObjectURL(blob);
+  const audio=new Audio(url);
+  audio.playbackRate=ttsSpeed;
+  return audio;
+}
+
 async function autoSpeak(text){
-  const clean=cleanText(text).substring(0,600);
+  const clean=cleanText(text);
   if(!clean)return;
+  const chunks=splitToChunks(clean);
+  if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
+
+  const orb=document.getElementById('voOrb');
+  if(voiceMode){
+    document.getElementById('voStatus').textContent='البوت يتحدث...';
+    orb.className='vo-orb speaking';orb.textContent='🔊';
+  } else {
+    toast('🔊 جاري التشغيل...');
+  }
+
   try{
-    const res=await fetchWithRetry(TTS,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:clean,speed:ttsSpeed})
-    });
-    const blob=await res.blob();
-    if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
-    const url=URL.createObjectURL(blob);
-    voiceAudio=new Audio(url);
-    voiceAudio.playbackRate=ttsSpeed;
-    if(voiceMode){
-      const orb=document.getElementById('voOrb');
-      document.getElementById('voStatus').textContent='البوت يتحدث...';
-      orb.className='vo-orb speaking';orb.textContent='🔊';
-      voiceAudio.onended=()=>{
-        orb.className='vo-orb';orb.textContent='🎤';
-        document.getElementById('voStatus').textContent='اضغط للتحدث مجدداً';
-      };
+    // تشغيل الدفعات بالترتيب
+    for(let i=0;i<chunks.length;i++){
+      if(!voiceMode && i===0 || voiceMode){
+        const audio=await fetchAudio(chunks[i]);
+        voiceAudio=audio;
+        await new Promise((resolve,reject)=>{
+          audio.onended=resolve;
+          audio.onerror=reject;
+          audio.play();
+        });
+        voiceAudio=null;
+      }
     }
-    voiceAudio.play();
-    if(!voiceMode)toast('🔊 جاري التشغيل...');
-  }catch(e){toast('⚠ تعذّر الاتصال بالخادم — تأكد من تشغيل Railway');}
+  }catch(e){}
+
+  // بعد انتهاء الكلام — استمع تلقائياً في وضع الصوت
+  if(voiceMode){
+    orb.className='vo-orb';orb.textContent='🎤';
+    document.getElementById('voStatus').textContent='جاري الاستماع...';
+    setTimeout(()=>{if(voiceMode&&!busy)startVoiceListen();},600);
+  }
 }
 
 // ══ VOICE MODE ══
 function openVoiceMode(){
-  // إلغاء أي قراءة جارية فور فتح وضع الصوت
   if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
   voiceMode=true;
   document.getElementById('voiceOverlay').classList.add('show');
   document.getElementById('voiceModeBtn').classList.add('active');
+  // ابدأ الاستماع تلقائياً
+  setTimeout(()=>startVoiceListen(),500);
 }
+
 function closeVoiceMode(){
   voiceMode=false;voiceListening=false;
+  clearTimeout(silenceTimer);
   if(rec){try{rec.stop();}catch(e){}rec=null;}
   if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
   document.getElementById('voiceOverlay').classList.remove('show');
@@ -660,53 +698,122 @@ function closeVoiceMode(){
   document.getElementById('voStatus').textContent='اضغط الكرة للتحدث';
   document.getElementById('voTranscript').textContent='سيظهر هنا ما تقوله...';
 }
-function toggleVoiceListen(){
+
+let silenceTimer=null;
+let accumulatedText='';
+
+function startVoiceListen(){
+  if(!voiceMode||busy||voiceListening)return;
   if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('المتصفح لا يدعم التعرف على الصوت');return;}
-  if(voiceListening){if(rec)rec.stop();return;}
   const orb=document.getElementById('voOrb');
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  rec=new SR();rec.lang='ar-SA';rec.interimResults=true;rec.continuous=false;
+  rec=new SR();
+  rec.lang='ar-SA';
+  rec.interimResults=true;
+  rec.continuous=true; // استمرار الاستماع
+  accumulatedText='';
+
   rec.onstart=()=>{
-    voiceListening=true;orb.className='vo-orb listening';orb.textContent='👂';
-    document.getElementById('voStatus').textContent='جاري الاستماع...';
+    voiceListening=true;
+    orb.className='vo-orb listening';orb.textContent='👂';
+    document.getElementById('voStatus').textContent='أنا أستمع...';
     document.getElementById('voTranscript').textContent='';
   };
+
   rec.onresult=e=>{
     let interim='',final='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       if(e.results[i].isFinal)final+=e.results[i][0].transcript;
       else interim+=e.results[i][0].transcript;
     }
-    document.getElementById('voTranscript').textContent=final||interim;
-    if(final)setTimeout(()=>sendVoiceMessage(final),300);
+    if(final)accumulatedText+=final;
+    document.getElementById('voTranscript').textContent=accumulatedText||interim;
+
+    // إذا توقفت عن الكلام لأكثر من ثانيتين → أرسل
+    clearTimeout(silenceTimer);
+    if(accumulatedText||final){
+      silenceTimer=setTimeout(()=>{
+        if(accumulatedText.trim()){
+          const msg=accumulatedText.trim();
+          accumulatedText='';
+          try{rec.stop();}catch(e){}
+          sendVoiceMessage(msg);
+        }
+      },2000); // ثانيتان صمت = إرسال
+    }
   };
+
+  rec.onspeechend=()=>{
+    // كشف توقف الكلام
+    clearTimeout(silenceTimer);
+    silenceTimer=setTimeout(()=>{
+      if(accumulatedText.trim()){
+        const msg=accumulatedText.trim();
+        accumulatedText='';
+        try{rec.stop();}catch(e){}
+        sendVoiceMessage(msg);
+      }
+    },1000);
+  };
+
   rec.onend=()=>{
     voiceListening=false;
-    if(!busy){orb.className='vo-orb';orb.textContent='🎤';document.getElementById('voStatus').textContent='اضغط للتحدث مجدداً';}
+    if(voiceMode&&!busy&&!accumulatedText){
+      orb.className='vo-orb';orb.textContent='🎤';
+      document.getElementById('voStatus').textContent='أنا أستمع...';
+      // أعد الاستماع تلقائياً
+      setTimeout(()=>{if(voiceMode&&!busy)startVoiceListen();},300);
+    }
   };
-  rec.onerror=e=>{voiceListening=false;orb.className='vo-orb';orb.textContent='🎤';document.getElementById('voStatus').textContent='خطأ: '+e.error;};
+
+  rec.onerror=e=>{
+    voiceListening=false;
+    if(e.error==='no-speech'&&voiceMode&&!busy){
+      setTimeout(()=>{if(voiceMode&&!busy)startVoiceListen();},500);
+    }else{
+      orb.className='vo-orb';orb.textContent='🎤';
+      document.getElementById('voStatus').textContent='خطأ: '+e.error;
+    }
+  };
+
   rec.start();
 }
+
+function toggleVoiceListen(){
+  if(voiceListening){clearTimeout(silenceTimer);try{rec&&rec.stop();}catch(e){}return;}
+  startVoiceListen();
+}
+
 async function sendVoiceMessage(text){
-  if(!text.trim())return;
-  document.getElementById('voOrb').className='vo-orb';
-  document.getElementById('voOrb').textContent='⏳';
+  if(!text.trim()||busy)return;
+  voiceListening=false;
+  const orb=document.getElementById('voOrb');
+  orb.className='vo-orb';orb.textContent='⏳';
   document.getElementById('voStatus').textContent='جاري المعالجة...';
+  document.getElementById('voTranscript').textContent=text;
   if(!aid)newChat();
   await send(text);
 }
 
-// ══ MIC للكتابة ══
+// ══ MIC للكتابة فقط — منفصل تماماً عن وضع الصوت ══
+let micRec=null; // rec منفصل للميكروفون
 function toggleMic(){
   if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('المتصفح لا يدعم الميكروفون');return;}
   const btn=document.getElementById('micBtn');
-  if(recOn){try{rec&&rec.stop();}catch(e){}recOn=false;btn.classList.remove('rec');return;}
+  if(recOn){
+    try{micRec&&micRec.stop();}catch(e){}
+    recOn=false;btn.classList.remove('rec');return;
+  }
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  rec=new SR();rec.lang='ar-SA';rec.interimResults=false;
-  rec.onresult=e=>{const ti=document.getElementById('ti');ti.value+=e.results[0][0].transcript;resize(ti);};
-  rec.onend=()=>{recOn=false;btn.classList.remove('rec');};
-  rec.onerror=()=>{recOn=false;btn.classList.remove('rec');toast('تعذّر الوصول للميكروفون');};
-  rec.start();recOn=true;btn.classList.add('rec');
+  micRec=new SR();micRec.lang='ar-SA';micRec.interimResults=false;
+  micRec.onresult=e=>{
+    const ti=document.getElementById('ti');
+    ti.value+=e.results[0][0].transcript;
+    resize(ti);
+  };
+  micRec.onend=()=>{recOn=false;btn.classList.remove('rec');};
+  micRec.onerror=()=>{recOn=false;btn.classList.remove('rec');toast('تعذّر الوصول للميكروفون');};
+  micRec.start();recOn=true;btn.classList.add('rec');
 }
 
 function onFile(e){
