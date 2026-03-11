@@ -158,9 +158,9 @@ def extract_text(filename: str, data: bytes) -> str:
 # ══ استخراج نص من موقع ══
 async def scrape_url(url: str) -> str:
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            resp = await c.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True, verify=False, headers={"User-Agent":"Mozilla/5.0"}) as c:
+
+            resp = await c.get(url)
             soup = BeautifulSoup(resp.text, "html.parser")
             for tag in soup(["script","style","nav","footer","header","aside"]):
                 tag.decompose()
@@ -227,14 +227,57 @@ async def upload(file: UploadFile = File(...)):
 
 @app.post("/api/search")
 async def search(req: SearchRequest):
+    results = []
+
+    # ══ محاولة 1: DuckDuckGo ══
     try:
-        results = []
         with DDGS() as ddgs:
             for r in ddgs.text(req.query, max_results=req.max_results):
                 results.append(f"• {r['title']}\n{r['body']}\n{r['href']}")
-        return {"results": "\n\n".join(results), "count": len(results)}
+        if results:
+            return {"results": "\n\n".join(results), "count": len(results), "source": "duckduckgo"}
     except Exception as e:
-        return {"results": "", "error": str(e)}
+        pass
+
+    # ══ محاولة 2: Scrapy عبر httpx (بدون SSL) ══
+    try:
+        search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(req.query)}"
+        async with httpx.AsyncClient(timeout=12, verify=False,
+            headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as c:
+            resp = await c.get(search_url)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select(".result__body")[:req.max_results]
+        for item in items:
+            title_el = item.select_one(".result__title")
+            snippet_el = item.select_one(".result__snippet")
+            url_el = item.select_one(".result__url")
+            title = title_el.get_text(strip=True) if title_el else ""
+            snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+            url = url_el.get_text(strip=True) if url_el else ""
+            if title or snippet:
+                results.append(f"• {title}\n{snippet}\n{url}")
+        if results:
+            return {"results": "\n\n".join(results), "count": len(results), "source": "scrapy_ddg"}
+    except Exception as e:
+        pass
+
+    # ══ محاولة 3: Google عبر httpx ══
+    try:
+        google_url = f"https://www.google.com/search?q={urllib.parse.quote(req.query)}&hl=ar&num=5"
+        async with httpx.AsyncClient(timeout=12, verify=False,
+            headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as c:
+            resp = await c.get(google_url)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for div in soup.select("div.BNeawe")[:req.max_results]:
+            text = div.get_text(strip=True)
+            if len(text) > 40:
+                results.append(f"• {text}")
+        if results:
+            return {"results": "\n\n".join(results), "count": len(results), "source": "google"}
+    except Exception as e:
+        pass
+
+    return {"results": "", "error": "فشل البحث من جميع المصادر", "count": 0}
 
 @app.post("/api/youtube")
 async def youtube(req: YouTubeRequest):
@@ -252,29 +295,55 @@ async def youtube(req: YouTubeRequest):
 
         video_id = video_id.strip()
         if not video_id:
-            return {"transcript": "", "error": "لم يتم التعرف على معرف الفيديو"}
+            return {"transcript": "", "error": "رابط غير صحيح"}
 
-        # محاولة استخراج بعدة طرق
+        # ══ محاولة استخراج الترجمة بالـ API الجديد ══
         transcript_list = None
-        for langs in [["ar"], ["en"], ["ar", "en"], ["fr"], ["auto"]]:
-            try:
-                if langs == ["auto"]:
-                    available = YouTubeTranscriptApi.list_transcripts(video_id)
-                    for t in available:
-                        transcript_list = t.fetch()
-                        break
-                else:
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            # API الجديد
+            ytt = YouTubeTranscriptApi()
+            fetched = ytt.fetch(video_id)
+            transcript_list = [{"text": s.text} for s in fetched.snippets]
+        except Exception:
+            pass
+
+        # ══ fallback للـ API القديم ══
+        if not transcript_list:
+            for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
+                try:
                     transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
-                if transcript_list:
-                    break
+                    if transcript_list:
+                        break
+                except:
+                    continue
+
+        # ══ fallback: قراءة صفحة يوتيوب مباشرة ══
+        if not transcript_list:
+            try:
+                yt_url = f"https://www.youtube.com/watch?v={video_id}"
+                async with httpx.AsyncClient(timeout=10, verify=False,
+                    headers={"User-Agent":"Mozilla/5.0"}) as c:
+                    resp = await c.get(yt_url)
+                soup = BeautifulSoup(resp.text, "html.parser")
+                # استخراج الوصف
+                desc = soup.find("meta", {"name": "description"})
+                title = soup.find("title")
+                info = []
+                if title:
+                    info.append(f"عنوان الفيديو: {title.text}")
+                if desc:
+                    info.append(f"الوصف: {desc.get('content','')}")
+                if info:
+                    return {"transcript": "\n".join(info), "video_id": video_id, "source": "page_meta"}
             except:
-                continue
+                pass
 
         if not transcript_list:
             return {"transcript": "", "error": f"لا تتوفر ترجمة لهذا الفيديو (ID: {video_id})"}
 
         transcript = " ".join([t["text"] for t in transcript_list])
-        return {"transcript": transcript[:8000], "video_id": video_id}
+        return {"transcript": transcript[:8000], "video_id": video_id, "source": "transcript"}
 
     except Exception as e:
         return {"transcript": "", "error": str(e)}
