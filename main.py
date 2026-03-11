@@ -300,32 +300,13 @@ async def youtube(req: YouTubeRequest):
         # ══ محاولة استخراج الترجمة بالـ API الجديد ══
         transcript_list = None
         try:
-             from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-
-video_id = "Gfr50f6ZBvo"  # ضع معرف الفيديو هنا
-
-try:
-    # API الجديد
-    ytt = YouTubeTranscriptApi()
-    fetched = ytt.fetch(video_id)
-    
-    # الخيار 1: استخدام to_raw_data() (أنصح بهذا)
-    transcript_list = fetched.to_raw_data()
-    
-    # الخيار 2: إذا أردت الوصول اليدوي
-    # transcript_list = [{"text": s.text, "start": s.start} for s in fetched.snippets]
-    
-    # طباعة النص فقط للتجربة
-    for item in transcript_list:
-        print(item["text"])
-        
-except TranscriptsDisabled:
-    print("النص الكتابي غير متاح لهذا الفيديو")
-except NoTranscriptFound:
-    print("لم يتم العثور على نص كتابي للغة المطلوبة")
-except Exception as e:
-    print(f"خطأ غير متوقع: {e}")
-
+             from youtube_transcript_api import YouTubeTranscriptApi
+            # API الجديد
+            ytt = YouTubeTranscriptApi()
+            fetched = ytt.fetch(video_id)
+            transcript_list = [{"text": s.text} for s in fetched.snippets]
+        except Exception as e:
+            print(f"خطأ الترجمة: {e}")  # التغيير الوحيد: e بدلاً من pass
         # ══ fallback: قراءة صفحة يوتيوب مباشرة ══
         if not transcript_list:
             try:
