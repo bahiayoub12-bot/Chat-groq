@@ -297,42 +297,106 @@ async def youtube(req: YouTubeRequest):
         if not video_id:
             return {"transcript": "", "error": "رابط غير صحيح"}
 
-        # ══ محاولة استخراج الترجمة بالـ API الجديد ══
-        transcript_list = None
-        try:
-             from youtube_transcript_api import YouTubeTranscriptApi
-            # API الجديد
-            ytt = YouTubeTranscriptApi()
-            fetched = ytt.fetch(video_id)
-            transcript_list = [{"text": s.text} for s in fetched.snippets]
-        except Exception:
-            pass
-        # ══ fallback: قراءة صفحة يوتيوب مباشرة ══
-        if not transcript_list:
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        # ══ محاولة 1: مع Webshare Proxy (إذا كانت متوفرة) ══
+        transcript_text = None
+        WEBSHARE_USER = os.environ.get("WEBSHARE_PROXY_USERNAME", "")
+        WEBSHARE_PASS = os.environ.get("WEBSHARE_PROXY_PASSWORD", "")
+
+        if WEBSHARE_USER and WEBSHARE_PASS:
             try:
-                yt_url = f"https://www.youtube.com/watch?v={video_id}"
-                async with httpx.AsyncClient(timeout=10, verify=False,
-                    headers={"User-Agent":"Mozilla/5.0"}) as c:
-                    resp = await c.get(yt_url)
-                soup = BeautifulSoup(resp.text, "html.parser")
-                # استخراج الوصف
-                desc = soup.find("meta", {"name": "description"})
-                title = soup.find("title")
-                info = []
-                if title:
-                    info.append(f"عنوان الفيديو: {title.text}")
-                if desc:
-                    info.append(f"الوصف: {desc.get('content','')}")
-                if info:
-                    return {"transcript": "\n".join(info), "video_id": video_id, "source": "page_meta"}
-            except:
+                from youtube_transcript_api.proxies import WebshareProxyConfig
+                ytt = YouTubeTranscriptApi(
+                    proxy_config=WebshareProxyConfig(
+                        proxy_username=WEBSHARE_USER,
+                        proxy_password=WEBSHARE_PASS,
+                    )
+                )
+                for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
+                    try:
+                        fetched = ytt.fetch(video_id, languages=langs)
+                        raw = fetched.to_raw_data()
+                        transcript_text = " ".join([s["text"] for s in raw])
+                        if transcript_text:
+                            break
+                    except Exception:
+                        continue
+            except Exception:
                 pass
 
-        if not transcript_list:
-            return {"transcript": "", "error": f"لا تتوفر ترجمة لهذا الفيديو (ID: {video_id})"}
+        # ══ محاولة 2: بدون proxy (API الجديد) ══
+        if not transcript_text:
+            try:
+                ytt = YouTubeTranscriptApi()
+                for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
+                    try:
+                        fetched = ytt.fetch(video_id, languages=langs)
+                        raw = fetched.to_raw_data()
+                        transcript_text = " ".join([s["text"] for s in raw])
+                        if transcript_text:
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
 
-        transcript = " ".join([t["text"] for t in transcript_list])
-        return {"transcript": transcript[:8000], "video_id": video_id, "source": "transcript"}
+        # ══ محاولة 3: Innertube API مباشرة ══
+        if not transcript_text:
+            try:
+                yt_page_url = f"https://www.youtube.com/watch?v={video_id}"
+                async with httpx.AsyncClient(timeout=15, verify=False,
+                    headers={"User-Agent": "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip"}) as c:
+                    page = await c.get(yt_page_url)
+                    key_match = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', page.text)
+                    if key_match:
+                        api_key = key_match.group(1)
+                        player_resp = await c.post(
+                            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
+                            json={"context": {"client": {"clientName": "ANDROID", "clientVersion": "20.10.38"}},
+                                  "videoId": video_id}
+                        )
+                        data = player_resp.json()
+                        tracks = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+                        if tracks:
+                            caption_url = tracks[0]["baseUrl"] + "&fmt=json3"
+                            cap_resp = await c.get(caption_url)
+                            cap_data = cap_resp.json()
+                            lines = []
+                            for ev in cap_data.get("events", []):
+                                for seg in ev.get("segs", []):
+                                    t = seg.get("utf8", "").strip()
+                                    if t and t != "\n":
+                                        lines.append(t)
+                            transcript_text = " ".join(lines)
+            except Exception:
+                pass
+
+        # ══ محاولة 4: عنوان + وصف الفيديو كحد أدنى ══
+        if not transcript_text:
+            try:
+                async with httpx.AsyncClient(timeout=10, verify=False,
+                    headers={"User-Agent": "Mozilla/5.0"}) as c:
+                    resp = await c.get(f"https://www.youtube.com/watch?v={video_id}")
+                soup = BeautifulSoup(resp.text, "html.parser")
+                info = []
+                title = soup.find("title")
+                desc = soup.find("meta", {"name": "description"})
+                if title:
+                    info.append(f"عنوان الفيديو: {title.text.replace(' - YouTube', '')}")
+                if desc:
+                    info.append(f"الوصف: {desc.get('content', '')}")
+                if info:
+                    return {"transcript": "\n".join(info), "video_id": video_id, "source": "page_meta",
+                            "note": "لم تتوفر الترجمة — تم استخراج العنوان والوصف فقط"}
+            except Exception:
+                pass
+
+        if not transcript_text:
+            proxy_hint = "" if (WEBSHARE_USER and WEBSHARE_PASS) else " — أضف WEBSHARE_PROXY_USERNAME/PASSWORD في Railway للحصول على نتائج أفضل"
+            return {"transcript": "", "error": f"يوتيوب يحجب السيرفر{proxy_hint}"}
+
+        return {"transcript": transcript_text[:8000], "video_id": video_id, "source": "transcript"}
 
     except Exception as e:
         return {"transcript": "", "error": str(e)}
@@ -419,8 +483,8 @@ async def test_all():
     # 3. YouTube Transcript
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        t = YouTubeTranscriptApi.get_transcript("YQHsXMglC9A", languages=["ar","en"])
-        results["youtube_transcript"] = f"✅ يعمل — {len(t)} جملة"
+        ytt=YouTubeTranscriptApi(); fetched=ytt.fetch("YQHsXMglC9A",languages=["ar","en"]); raw=fetched.to_raw_data()
+        results["youtube_transcript"] = f"✅ يعمل — {len(raw)} جملة"
     except Exception as e:
         results["youtube_transcript"] = f"❌ {str(e)[:80]}"
 
@@ -435,7 +499,7 @@ async def test_all():
     try:
         import httpx
         from bs4 import BeautifulSoup
-        async with httpx.AsyncClient(timeout=8) as c:
+        async with httpx.AsyncClient(timeout=8, verify=False) as c:
             resp = await c.get("https://example.com")
         soup = BeautifulSoup(resp.text, "html.parser")
         title = soup.find("title").text if soup.find("title") else "لا عنوان"
