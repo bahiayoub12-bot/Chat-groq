@@ -309,8 +309,8 @@ async def youtube(req: YouTubeRequest):
                 from youtube_transcript_api.proxies import WebshareProxyConfig
                 ytt = YouTubeTranscriptApi(
                     proxy_config=WebshareProxyConfig(
-                        proxy_username=WEBSHARE_olecdnna,
-                        proxy_password=WEBSHARE_dk2q2bk5u707,
+                        proxy_username=ayoub12aba,
+                        proxy_password=BahiAyoub12,
                     )
                 )
                 for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
