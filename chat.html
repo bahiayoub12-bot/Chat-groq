@@ -610,11 +610,11 @@ function closeVoiceMode(){
   document.getElementById('voStatus').textContent='اضغط للتحدث';
   document.getElementById('voTranscript').textContent='سيظهر هنا ما تقوله...';
 }
-<Streaming stopped because the conversation grew too long for this model>
 
 function toggleVoiceListen(){
   if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){
-    toast('المتصفح لا يدعم التعرف على الصوت');return;}
+    toast('المتصفح لا يدعم التعرف على الصوت');
+    return;
   }
   if(voiceListening){
     if(rec)rec.stop();
@@ -622,11 +622,15 @@ function toggleVoiceListen(){
   }
   const orb=document.getElementById('voOrb');
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  rec=new SR();rec.lang='ar-SA';rec.interimResults=true;rec.continuous=false;
+  rec=new SR();
+  rec.lang='ar-SA';
+  rec.interimResults=true;
+  rec.continuous=false;
 
   rec.onstart=()=>{
     voiceListening=true;
-    orb.className='vo-orb listening';orb.textContent='👂';
+    orb.className='vo-orb listening';
+    orb.textContent='👂';
     document.getElementById('voStatus').textContent='جاري الاستماع...';
     document.getElementById('voTranscript').textContent='';
   };
@@ -646,14 +650,16 @@ function toggleVoiceListen(){
   rec.onend=()=>{
     voiceListening=false;
     if(!busy){
-      orb.className='vo-orb';orb.textContent='🎤';
+      orb.className='vo-orb';
+      orb.textContent='🎤';
       document.getElementById('voStatus').textContent='اضغط للتحدث';
     }
   };
 
   rec.onerror=e=>{
     voiceListening=false;
-    orb.className='vo-orb';orb.textContent='🎤';
+    orb.className='vo-orb';
+    orb.textContent='🎤';
     document.getElementById('voStatus').textContent='خطأ: '+e.error;
   };
 
@@ -669,29 +675,48 @@ async function sendVoiceMessage(text){
   await send(text);
 }
 
-// ══ MIC (للكتابة) ══
 function toggleMic(){
   if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){
-    toast('المتصفح لا يدعم الميكروفون');return;
+    toast('المتصفح لا يدعم الميكروفون');
+    return;
   }
   const btn=document.getElementById('micBtn');
   if(recOn){
-    rec&&rec.stop();recOn=false;btn.classList.remove('rec');return;
+    rec&&rec.stop();
+    recOn=false;
+    btn.classList.remove('rec');
+    return;
   }
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  rec=new SR();rec.lang='ar-SA';rec.interimResults=false;
+  rec=new SR();
+  rec.lang='ar-SA';
+  rec.interimResults=false;
+  
   rec.onresult=e=>{
     const ti=document.getElementById('ti');
     ti.value+=e.results[0][0].transcript;
     resize(ti);
   };
-  rec.onend=()=>{recOn=false;btn.classList.remove('rec');};
-  rec.onerror=()=>{recOn=false;btn.classList.remove('rec');toast('تعذّر الوصول للميكروفون');};
-  rec.start();recOn=true;btn.classList.add('rec');
+  
+  rec.onend=()=>{
+    recOn=false;
+    btn.classList.remove('rec');
+  };
+  
+  rec.onerror=()=>{
+    recOn=false;
+    btn.classList.remove('rec');
+    toast('تعذّر الوصول للميكروفون');
+  };
+  
+  rec.start();
+  recOn=true;
+  btn.classList.add('rec');
 }
 
 function onFile(e){
-  const f=e.target.files[0];if(!f)return;
+  const f=e.target.files[0];
+  if(!f)return;
   pFile=f;
   document.getElementById('fileIcon').textContent=fIcon(f.name);
   document.getElementById('fileName').textContent=f.name;
@@ -770,4 +795,3 @@ init();
 </script>
 </body>
 </html>
-  
