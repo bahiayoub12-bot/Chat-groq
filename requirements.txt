@@ -10,6 +10,10 @@ openpyxl
 pandas
 numpy
 gtts
+edge-tts
 duckduckgo-search
 youtube-transcript-api
 supabase
+beautifulsoup4
+scrapy
+Pillow
