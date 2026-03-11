@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from groq import Groq
-import os, io, base64, tempfile
+import os, io, base64, tempfile, asyncio, urllib.parse
 
 # مكتبات الملفات
 import pypdf
@@ -15,9 +15,19 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 
-# مكتبات جديدة
+# مكتبات البحث والإنترنت
 from duckduckgo_search import DDGS
 from youtube_transcript_api import YouTubeTranscriptApi
+import httpx
+from bs4 import BeautifulSoup
+
+# TTS
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except:
+    EDGE_TTS_AVAILABLE = False
+
 from gtts import gTTS
 
 try:
@@ -37,6 +47,24 @@ app.add_middleware(
 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
+# ══ System Prompt ══
+SYSTEM_PROMPT = """أنت Groq Chat، مساعد ذكاء اصطناعي متطور ومتعدد القدرات.
+
+قدراتك الفعلية:
+- تحليل الملفات: PDF, Word, Excel, CSV, الصور
+- البحث في الإنترنت: عندما يطلب المستخدم البحث أو الأخبار
+- استخراج نصوص فيديوهات يوتيوب: عندما يرسل المستخدم رابط يوتيوب
+- قراءة محتوى المواقع: عندما يرسل المستخدم رابط موقع
+- التحدث والاستماع بالصوت
+
+قواعد مهمة:
+- لا تقل أبداً "لا أستطيع الوصول للإنترنت" لأنك تستطيع ذلك عبر الأدوات المتاحة
+- عندما يرسل المستخدم رابط يوتيوب، النص سيُستخرج تلقائياً وسيصلك في السياق
+- عندما يطلب البحث، النتائج ستصلك تلقائياً في السياق
+- أجب دائماً بالعربية ما لم يطلب المستخدم غير ذلك
+- كن مختصراً وواضحاً في إجاباتك
+- أنت تعمل على Railway"""
+
 # ══ استخراج النص من الملفات ══
 
 def extract_pdf(data: bytes) -> str:
@@ -52,10 +80,13 @@ def extract_pdf(data: bytes) -> str:
                     for row in table:
                         text += " | ".join([str(c) for c in row if c]) + "\n"
     except:
-        reader = pypdf.PdfReader(io.BytesIO(data))
-        for page in reader.pages:
-            text += page.extract_text() or ""
-    return text[:8000]
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(data))
+            for page in reader.pages:
+                text += page.extract_text() or ""
+        except:
+            pass
+    return text[:8000] if text else "[لم يتم استخراج نص من PDF]"
 
 def extract_docx(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
@@ -74,7 +105,6 @@ def extract_excel(data: bytes) -> str:
             text += f"الأبعاد: {df.shape[0]} صف × {df.shape[1]} عمود\n"
             text += f"الأعمدة: {', '.join([str(c) for c in df.columns])}\n"
             text += df.to_string(max_rows=50) + "\n"
-            # إحصائيات
             numeric_cols = df.select_dtypes(include=[np.number])
             if not numeric_cols.empty:
                 text += "\nإحصائيات:\n" + numeric_cols.describe().to_string() + "\n"
@@ -105,7 +135,6 @@ def extract_csv(data: bytes) -> str:
         return data.decode("utf-8", errors="ignore")[:8000]
 
 def extract_image(data: bytes, filename: str) -> str:
-    # OCR أولاً إذا كان متاحاً
     if OCR_AVAILABLE:
         try:
             img = Image.open(io.BytesIO(data))
@@ -118,17 +147,30 @@ def extract_image(data: bytes, filename: str) -> str:
 
 def extract_text(filename: str, data: bytes) -> str:
     ext = filename.lower().split(".")[-1]
-    if ext == "pdf":                    return extract_pdf(data)
-    elif ext == "docx":                 return extract_docx(data)
-    elif ext in ("xlsx", "xls"):        return extract_excel(data)
-    elif ext == "csv":                  return extract_csv(data)
+    if ext == "pdf":                         return extract_pdf(data)
+    elif ext == "docx":                      return extract_docx(data)
+    elif ext in ("xlsx", "xls"):             return extract_excel(data)
+    elif ext == "csv":                       return extract_csv(data)
     elif ext in ("jpg","jpeg","png","webp"): return extract_image(data, filename)
-    elif ext in ("txt", "md"):
-        return data.decode("utf-8", errors="ignore")[:8000]
+    elif ext in ("txt", "md"):               return data.decode("utf-8", errors="ignore")[:8000]
     return ""
 
-# ══ نقاط API ══
+# ══ استخراج نص من موقع ══
+async def scrape_url(url: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            resp = await c.get(url, headers=headers)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for tag in soup(["script","style","nav","footer","header","aside"]):
+                tag.decompose()
+            text = soup.get_text(separator="\n", strip=True)
+            lines = [l.strip() for l in text.splitlines() if len(l.strip()) > 30]
+            return "\n".join(lines)[:6000]
+    except Exception as e:
+        return f"[خطأ في قراءة الموقع: {str(e)}]"
 
+# ══ Models ══
 class ChatRequest(BaseModel):
     messages: list
     model: str = "llama-3.3-70b-versatile"
@@ -140,16 +182,25 @@ class SearchRequest(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     lang: str = "ar"
+    speed: float = 1.0
 
 class YouTubeRequest(BaseModel):
     url: str
 
+class ScrapeRequest(BaseModel):
+    url: str
+
+# ══ Endpoints ══
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    messages = list(req.messages)
+    if not messages or messages[0].get("role") != "system":
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     response = client.chat.completions.create(
         model=req.model,
-        messages=req.messages,
-        max_tokens=1024,
+        messages=messages,
+        max_tokens=1500,
     )
     return {"reply": response.choices[0].message.content}
 
@@ -157,27 +208,21 @@ async def chat(req: ChatRequest):
 async def upload(file: UploadFile = File(...)):
     data = await file.read()
     text = extract_text(file.filename, data)
-
     if text == "__IMAGE__":
         b64 = base64.b64encode(data).decode()
         ext = file.filename.lower().split(".")[-1]
         mime = "image/jpeg" if ext in ("jpg","jpeg") else f"image/{ext}"
         response = client.chat.completions.create(
             model="llama-3.2-11b-vision-preview",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                    {"type": "text", "text": "صف محتوى هذه الصورة بالتفصيل بالعربية"}
-                ]
-            }],
+            messages=[{"role":"user","content":[
+                {"type":"image_url","image_url":{"url":f"data:{mime};base64,{b64}"}},
+                {"type":"text","text":"صف محتوى هذه الصورة بالتفصيل بالعربية"}
+            ]}],
             max_tokens=1024
         )
         return {"text": response.choices[0].message.content, "filename": file.filename, "type": "image"}
-
     if not text:
         return {"text": "", "filename": file.filename, "message": "لم يتم استخراج نص"}
-
     return {"text": text, "filename": file.filename, "type": "document"}
 
 @app.post("/api/search")
@@ -187,37 +232,76 @@ async def search(req: SearchRequest):
         with DDGS() as ddgs:
             for r in ddgs.text(req.query, max_results=req.max_results):
                 results.append(f"• {r['title']}\n{r['body']}\n{r['href']}")
-        text = "\n\n".join(results)
-        return {"results": text, "count": len(results)}
+        return {"results": "\n\n".join(results), "count": len(results)}
     except Exception as e:
         return {"results": "", "error": str(e)}
 
 @app.post("/api/youtube")
 async def youtube(req: YouTubeRequest):
     try:
-        # استخراج معرف الفيديو
-        url = req.url
+        url = req.url.strip()
         video_id = ""
+
         if "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0]
-        elif "v=" in url:
-            video_id = url.split("v=")[1].split("&")[0]
+            video_id = url.split("youtu.be/")[1].split("?")[0].split("/")[0]
+        elif "youtube.com/watch" in url:
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            video_id = params.get("v", [""])[0]
+        elif "youtube.com/shorts/" in url:
+            video_id = url.split("youtube.com/shorts/")[1].split("?")[0]
 
+        video_id = video_id.strip()
         if not video_id:
-            return {"transcript": "", "error": "رابط غير صحيح"}
+            return {"transcript": "", "error": "لم يتم التعرف على معرف الفيديو"}
 
-        transcript_list = YouTubeTranscriptApi.get_transcript(
-            video_id, languages=["ar", "en", "auto"]
-        )
+        # محاولة استخراج بعدة طرق
+        transcript_list = None
+        for langs in [["ar"], ["en"], ["ar", "en"], ["fr"], ["auto"]]:
+            try:
+                if langs == ["auto"]:
+                    available = YouTubeTranscriptApi.list_transcripts(video_id)
+                    for t in available:
+                        transcript_list = t.fetch()
+                        break
+                else:
+                    transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
+                if transcript_list:
+                    break
+            except:
+                continue
+
+        if not transcript_list:
+            return {"transcript": "", "error": f"لا تتوفر ترجمة لهذا الفيديو (ID: {video_id})"}
+
         transcript = " ".join([t["text"] for t in transcript_list])
         return {"transcript": transcript[:8000], "video_id": video_id}
+
     except Exception as e:
         return {"transcript": "", "error": str(e)}
 
+@app.post("/api/scrape")
+async def scrape(req: ScrapeRequest):
+    content = await scrape_url(req.url)
+    return {"content": content, "url": req.url}
+
 @app.post("/api/tts")
 async def tts(req: TTSRequest):
+    text = req.text[:600]
+    speed = max(0.5, min(2.0, req.speed))
+
+    if EDGE_TTS_AVAILABLE:
+        try:
+            rate_percent = int((speed - 1.0) * 100)
+            rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
+            communicate = edge_tts.Communicate(text, "ar-SA-ZariyahNeural", rate=rate_str)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            await communicate.save(tmp.name)
+            return FileResponse(tmp.name, media_type="audio/mpeg", filename="reply.mp3")
+        except:
+            pass
+
     try:
-        tts_obj = gTTS(text=req.text[:500], lang=req.lang, slow=False)
+        tts_obj = gTTS(text=text, lang=req.lang, slow=(speed < 0.8))
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
         tts_obj.save(tmp.name)
         return FileResponse(tmp.name, media_type="audio/mpeg", filename="reply.mp3")
@@ -226,6 +310,6 @@ async def tts(req: TTSRequest):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "ocr": OCR_AVAILABLE}
+    return {"status": "ok", "ocr": OCR_AVAILABLE, "edge_tts": EDGE_TTS_AVAILABLE, "platform": "railway"}
 
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
