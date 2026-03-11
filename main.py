@@ -286,6 +286,7 @@ async def scrape(req: ScrapeRequest):
 
 @app.post("/api/tts")
 async def tts(req: TTSRequest):
+    from fastapi.responses import Response
     text = req.text[:600]
     speed = max(0.5, min(2.0, req.speed))
 
@@ -296,15 +297,39 @@ async def tts(req: TTSRequest):
             communicate = edge_tts.Communicate(text, "ar-SA-ZariyahNeural", rate=rate_str)
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             await communicate.save(tmp.name)
-            return FileResponse(tmp.name, media_type="audio/mpeg", filename="reply.mp3")
-        except:
+            with open(tmp.name, "rb") as f:
+                audio_bytes = f.read()
+            os.unlink(tmp.name)
+            return Response(
+                content=audio_bytes,
+                media_type="audio/mpeg",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Content-Disposition": "inline; filename=reply.mp3"
+                }
+            )
+        except Exception as e:
             pass
 
     try:
         tts_obj = gTTS(text=text, lang=req.lang, slow=(speed < 0.8))
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
         tts_obj.save(tmp.name)
-        return FileResponse(tmp.name, media_type="audio/mpeg", filename="reply.mp3")
+        with open(tmp.name, "rb") as f:
+            audio_bytes = f.read()
+        os.unlink(tmp.name)
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Content-Disposition": "inline; filename=reply.mp3"
+            }
+        )
     except Exception as e:
         return {"error": str(e)}
 
@@ -313,3 +338,78 @@ def health():
     return {"status": "ok", "ocr": OCR_AVAILABLE, "edge_tts": EDGE_TTS_AVAILABLE, "platform": "railway"}
 
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
+
+@app.get("/test")
+async def test_all():
+    results = {}
+
+    # 1. edge-tts
+    try:
+        import edge_tts
+        results["edge_tts"] = "✅ متاح"
+    except Exception as e:
+        results["edge_tts"] = f"❌ {str(e)[:60]}"
+
+    # 2. DuckDuckGo Search
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            r = list(ddgs.text("اختبار", max_results=1))
+        results["duckduckgo"] = f"✅ يعمل — {r[0]['title'][:40] if r else 'لا نتائج'}"
+    except Exception as e:
+        results["duckduckgo"] = f"❌ {str(e)[:80]}"
+
+    # 3. YouTube Transcript
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        t = YouTubeTranscriptApi.get_transcript("YQHsXMglC9A", languages=["ar","en"])
+        results["youtube_transcript"] = f"✅ يعمل — {len(t)} جملة"
+    except Exception as e:
+        results["youtube_transcript"] = f"❌ {str(e)[:80]}"
+
+    # 4. Scrapy
+    try:
+        import scrapy
+        results["scrapy"] = f"✅ متاح — v{scrapy.__version__}"
+    except Exception as e:
+        results["scrapy"] = f"❌ {str(e)[:60]}"
+
+    # 5. BeautifulSoup + httpx
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+        async with httpx.AsyncClient(timeout=8) as c:
+            resp = await c.get("https://example.com")
+        soup = BeautifulSoup(resp.text, "html.parser")
+        title = soup.find("title").text if soup.find("title") else "لا عنوان"
+        results["beautifulsoup_httpx"] = f"✅ يعمل — {title[:40]}"
+    except Exception as e:
+        results["beautifulsoup_httpx"] = f"❌ {str(e)[:80]}"
+
+    # 6. pdfplumber
+    try:
+        import pdfplumber
+        results["pdfplumber"] = "✅ متاح"
+    except Exception as e:
+        results["pdfplumber"] = f"❌ {str(e)[:60]}"
+
+    # 7. pandas + numpy
+    try:
+        import pandas as pd
+        import numpy as np
+        results["pandas_numpy"] = f"✅ pandas {pd.__version__} / numpy {np.__version__}"
+    except Exception as e:
+        results["pandas_numpy"] = f"❌ {str(e)[:60]}"
+
+    # 8. Groq API
+    try:
+        r = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role":"user","content":"قل: اختبار ناجح"}],
+            max_tokens=10
+        )
+        results["groq_api"] = f"✅ {r.choices[0].message.content}"
+    except Exception as e:
+        results["groq_api"] = f"❌ {str(e)[:80]}"
+
+    return {"platform": "railway", "tests": results}
