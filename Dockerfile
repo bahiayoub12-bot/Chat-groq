@@ -2,13 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend and frontend
-COPY backend/main.py .
-COPY frontend/ ./frontend/
+COPY main.py .
+COPY index.html ./frontend/index.html
 
 EXPOSE 8000
 
