@@ -183,6 +183,18 @@ class TTSRequest(BaseModel):
     text: str
     lang: str = "ar"
     speed: float = 1.0
+    voice: str = "ar-SA-ZariyahNeural"
+
+VALID_VOICES = {
+    "ar-SA-ZariyahNeural","ar-SA-HamedNeural",
+    "ar-EG-SalmaNeural","ar-EG-ShakirNeural",
+    "ar-DZ-AminaNeural","ar-DZ-IsmaelNeural",
+    "ar-AE-FatimaNeural","ar-AE-HamdanNeural",
+    "ar-MA-MounaNeural","ar-MA-JamalNeural",
+    "ar-IQ-RanaNeural","ar-IQ-BasselNeural",
+    "ar-LY-ImanNeural","ar-TN-HediNeural",
+    "ar-KW-FahedNeural","ar-SY-AmanyNeural",
+}
 
 class YouTubeRequest(BaseModel):
     url: str
@@ -309,8 +321,8 @@ async def youtube(req: YouTubeRequest):
                 from youtube_transcript_api.proxies import WebshareProxyConfig
                 ytt = YouTubeTranscriptApi(
                     proxy_config=WebshareProxyConfig(
-                        proxy_username=ayoub12aba,
-                        proxy_password=BahiAyoub12,
+                        proxy_username=WEBSHARE_USER,
+                        proxy_password=WEBSHARE_PASS,
                     )
                 )
                 for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
@@ -416,7 +428,8 @@ async def tts(req: TTSRequest):
         try:
             rate_percent = int((speed - 1.0) * 100)
             rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-            communicate = edge_tts.Communicate(text, "ar-SA-ZariyahNeural", rate=rate_str)
+            selected_voice = req.voice if req.voice in VALID_VOICES else "ar-SA-ZariyahNeural"
+            communicate = edge_tts.Communicate(text, selected_voice, rate=rate_str)
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             await communicate.save(tmp.name)
             with open(tmp.name, "rb") as f:
