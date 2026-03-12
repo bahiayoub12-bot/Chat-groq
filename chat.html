@@ -806,7 +806,15 @@ async function send(forcedText){
     try{
       const q=text.replace(/^(ابحث عن|ابحث|search about|search)\s*/i,'');
       const res=await fetch(SEARCH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
-      const data=await res.json();fileContext=data.results||'';
+      const data=await res.json();
+      fileContext=data.results||'';
+      if(data.source_label&&data.count>0){
+        const srcBadge=document.createElement('div');
+        srcBadge.style.cssText='font-size:0.62rem;color:#5f6a88;font-family:JetBrains Mono,monospace;padding:2px 8px;margin-top:4px;';
+        srcBadge.textContent='تم البحث عبر '+data.source_label+' · '+data.count+' نتيجة';
+        const lastMsg=document.getElementById('msgs').lastElementChild;
+        if(lastMsg)lastMsg.appendChild(srcBadge);
+      }
     }catch(e){fileContext='';}
   }
   else{addBubble('user',text);addTyping();}
