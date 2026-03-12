@@ -1,598 +1,1016 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from groq import Groq
-import os, io, base64, tempfile, asyncio, urllib.parse
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Groq Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#07080f;--sb:#0a0c16;--surface:#0d1020;--s2:#111525;--s3:#161b2e;
+  --b1:rgba(255,255,255,0.06);--b2:rgba(255,255,255,0.11);
+  --a1:#6c8fff;--a2:#a56bff;--a3:#00e5b0;--a4:#ff9f5a;
+  --glow:rgba(108,143,255,0.25);--glow2:rgba(165,107,255,0.2);--glow3:rgba(0,229,176,0.2);
+  --tx:#dde4f8;--mu:#5f6a88;--di:#252d48;
+  --red:#ff6b6b;--grn:#00e5b0;
+}
+html,body{height:100%;overflow:hidden;}
+body{font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--tx);display:flex;}
 
-# مكتبات الملفات
-import pypdf
-import pdfplumber
-from docx import Document
-import openpyxl
-import pandas as pd
-import numpy as np
-from PIL import Image
+/* BG */
+.bg-aurora{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}
+.bg-aurora::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;
+  background:radial-gradient(circle,rgba(108,143,255,0.08) 0%,transparent 60%);
+  top:-200px;right:-200px;animation:aur1 20s ease-in-out infinite;}
+.bg-aurora::after{content:'';position:absolute;width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(circle,rgba(165,107,255,0.07) 0%,transparent 60%);
+  bottom:-150px;left:-150px;animation:aur2 25s ease-in-out infinite;}
+.bg-aurora2{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}
+.bg-aurora2::before{content:'';position:absolute;width:400px;height:400px;border-radius:50%;
+  background:radial-gradient(circle,rgba(0,229,176,0.05) 0%,transparent 60%);
+  top:40%;left:30%;animation:aur3 30s ease-in-out infinite;}
+@keyframes aur1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,-30px) scale(1.1)}}
+@keyframes aur2{0%,100%{transform:translate(0,0)}50%{transform:translate(-30px,20px) scale(1.08)}}
+@keyframes aur3{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(20px,-40px) scale(1.15)}66%{transform:translate(-20px,30px) scale(0.9)}}
+.bg-dots{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:radial-gradient(circle,rgba(108,143,255,0.12) 1px,transparent 1px);
+  background-size:32px 32px;opacity:0.4;}
 
-# مكتبات البحث والإنترنت
-from duckduckgo_search import DDGS
-from youtube_transcript_api import YouTubeTranscriptApi
-import httpx
-from bs4 import BeautifulSoup
+/* SIDEBAR */
+#sidebar{width:260px;min-width:260px;background:var(--sb);border-left:1px solid var(--b1);
+  display:flex;flex-direction:column;height:100%;position:relative;z-index:10;
+  transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);}
+.sb-head{padding:16px 14px 13px;border-bottom:1px solid var(--b1);}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.brand-logo{width:38px;height:38px;border-radius:12px;
+  background:linear-gradient(135deg,var(--a1),var(--a2));
+  display:flex;align-items:center;justify-content:center;
+  font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#fff;
+  box-shadow:0 0 20px var(--glow),0 0 40px var(--glow2);flex-shrink:0;}
+.brand-name{font-size:1.05rem;font-weight:900;
+  background:linear-gradient(90deg,var(--a1),var(--a2),var(--a3));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-size:200%;animation:gradShift 4s ease infinite;}
+@keyframes gradShift{0%,100%{background-position:0%}50%{background-position:100%}}
+.new-btn{width:100%;background:linear-gradient(135deg,var(--a1),var(--a2));border:none;
+  border-radius:10px;padding:10px;color:#fff;font-family:'Tajawal',sans-serif;
+  font-size:0.86rem;font-weight:700;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;gap:7px;transition:all 0.25s;box-shadow:0 4px 18px var(--glow);}
+.new-btn:hover{transform:translateY(-2px);box-shadow:0 8px 28px var(--glow);}
+.sb-hist{flex:1;overflow-y:auto;padding:8px;}
+.sb-hist::-webkit-scrollbar{width:2px;}
+.sb-hist::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
+.sb-lbl{font-size:0.57rem;color:var(--di);font-family:'JetBrains Mono',monospace;
+  text-transform:uppercase;letter-spacing:2px;padding:6px 8px 9px;}
+.h-item{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:9px;
+  cursor:pointer;margin-bottom:2px;transition:all 0.15s;border:1px solid transparent;}
+.h-item:hover{background:var(--s2);border-color:var(--b1);}
+.h-item.active{background:var(--s3);border-color:rgba(108,143,255,0.2);}
+.h-icon{font-size:11px;opacity:0.35;flex-shrink:0;}
+.h-txt{flex:1;font-size:0.79rem;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.h-item.active .h-txt{color:var(--tx);}
+.h-del{background:none;border:none;color:var(--di);font-size:14px;cursor:pointer;padding:0 2px;
+  opacity:0;transition:all 0.15s;border-radius:3px;}
+.h-item:hover .h-del{opacity:1;}
+.h-del:hover{color:var(--red);}
+.sb-foot{padding:13px 14px;border-top:1px solid var(--b1);}
+.sb-foot label{display:block;font-size:0.57rem;color:var(--di);
+  font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;}
+select#modelSel{width:100%;background:var(--s2);border:1px solid var(--b2);
+  border-radius:8px;padding:8px 10px;color:var(--tx);font-family:'JetBrains Mono',monospace;
+  font-size:0.68rem;cursor:pointer;outline:none;transition:all 0.2s;}
+select#modelSel:focus{border-color:var(--a1);box-shadow:0 0 0 2px var(--glow);}
+select#modelSel option{background:var(--s2);}
 
-# TTS
-try:
-    import edge_tts
-    EDGE_TTS_AVAILABLE = True
-except:
-    EDGE_TTS_AVAILABLE = False
+/* TOPBAR */
+#main{flex:1;display:flex;flex-direction:column;height:100%;min-width:0;overflow:hidden;position:relative;z-index:1;}
+.topbar{background:rgba(7,8,15,0.9);backdrop-filter:blur(28px);
+  border-bottom:1px solid var(--b1);padding:10px 16px;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.tb-left{display:flex;align-items:center;gap:10px;}
+#menuBtn{display:none;background:none;border:1px solid var(--b2);border-radius:8px;
+  width:32px;height:32px;color:var(--mu);cursor:pointer;font-size:15px;
+  align-items:center;justify-content:center;transition:all 0.15s;}
+.tb-title{font-size:0.88rem;font-weight:700;}
+.tb-sub{font-size:0.58rem;color:var(--di);font-family:'JetBrains Mono',monospace;margin-top:1px;}
+.tb-right{display:flex;align-items:center;gap:6px;}
+.online-badge{display:flex;align-items:center;gap:5px;
+  background:rgba(0,229,176,0.06);border:1px solid rgba(0,229,176,0.18);
+  border-radius:20px;padding:3px 10px;font-size:0.6rem;color:var(--grn);
+  font-family:'JetBrains Mono',monospace;}
+.pulse{width:5px;height:5px;border-radius:50%;background:var(--grn);animation:blink 2s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+.speed-wrap{display:flex;align-items:center;gap:6px;background:rgba(108,143,255,0.07);
+  border:1px solid rgba(108,143,255,0.15);border-radius:8px;padding:4px 10px;}
+.speed-lbl{font-size:0.57rem;color:var(--mu);font-family:'JetBrains Mono',monospace;}
+.speed-val{font-size:0.61rem;color:var(--a1);font-family:'JetBrains Mono',monospace;min-width:28px;text-align:center;}
+input#speedSlider{-webkit-appearance:none;width:68px;height:3px;border-radius:2px;background:var(--b2);outline:none;cursor:pointer;}
+input#speedSlider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:linear-gradient(135deg,var(--a1),var(--a2));cursor:pointer;box-shadow:0 0 6px var(--glow);}
+.tb-voice-btn{background:rgba(0,229,176,0.07);border:1px solid rgba(0,229,176,0.2);
+  border-radius:8px;padding:5px 12px;color:var(--grn);cursor:pointer;
+  font-size:0.72rem;font-family:'Tajawal',sans-serif;transition:all 0.2s;display:flex;align-items:center;gap:5px;}
+.tb-voice-btn.active{background:rgba(0,229,176,0.15);border-color:rgba(0,229,176,0.4);}
+.dash-btn{background:linear-gradient(135deg,rgba(108,143,255,0.1),rgba(165,107,255,0.1));
+  border:1px solid rgba(108,143,255,0.25);border-radius:8px;padding:5px 13px;
+  color:#b0c0ff;cursor:pointer;font-size:0.73rem;font-family:'Tajawal',sans-serif;
+  font-weight:600;transition:all 0.2s;display:flex;align-items:center;gap:5px;}
+.dash-btn:hover{background:linear-gradient(135deg,rgba(108,143,255,0.2),rgba(165,107,255,0.2));transform:translateY(-1px);}
+.icon-btn{background:none;border:1px solid var(--b1);border-radius:7px;
+  width:30px;height:30px;color:var(--mu);cursor:pointer;font-size:13px;
+  display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+.icon-btn:hover{background:var(--s2);color:var(--tx);}
+.voice-select-wrap{display:flex;align-items:center;gap:5px;background:rgba(0,229,176,0.06);
+  border:1px solid rgba(0,229,176,0.15);border-radius:8px;padding:3px 8px;}
+.voice-select-lbl{font-size:0.6rem;color:var(--mu);}
+select#voiceSel{background:transparent;border:none;color:var(--grn);
+  font-family:'Tajawal',sans-serif;font-size:0.72rem;font-weight:600;
+  cursor:pointer;outline:none;max-width:100px;}
+select#voiceSel option{background:#111525;color:var(--tx);}
 
-try:
-    from gtts import gTTS
-    GTTS_AVAILABLE = True
-except:
-    GTTS_AVAILABLE = False
+/* ══ VOICE OVERLAY — تصميم جديد ══ */
+#voiceOverlay{display:none;position:fixed;inset:0;z-index:200;
+  background:linear-gradient(135deg,rgba(5,6,16,0.97),rgba(8,5,20,0.97));
+  backdrop-filter:blur(30px);flex-direction:column;align-items:center;justify-content:center;gap:22px;}
+#voiceOverlay.show{display:flex;}
 
-try:
-    import pytesseract
-    OCR_AVAILABLE = True
-except:
-    OCR_AVAILABLE = False
+/* تموجات خلفية */
+.vo-bg-rings{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;}
+.vo-bg-ring{position:absolute;border-radius:50%;border:1px solid rgba(108,143,255,0.08);animation:bgRingPulse 3s ease-in-out infinite;}
+.vo-bg-ring:nth-child(1){width:200px;height:200px;}
+.vo-bg-ring:nth-child(2){width:300px;height:300px;animation-delay:0.5s;border-color:rgba(165,107,255,0.06);}
+.vo-bg-ring:nth-child(3){width:420px;height:420px;animation-delay:1s;border-color:rgba(0,229,176,0.04);}
+.vo-bg-ring:nth-child(4){width:560px;height:560px;animation-delay:1.5s;border-color:rgba(108,143,255,0.03);}
+@keyframes bgRingPulse{0%,100%{transform:scale(1);opacity:0.5}50%{transform:scale(1.05);opacity:1}}
 
-app = FastAPI()
+.vo-title{font-size:1.1rem;font-weight:800;color:var(--tx);letter-spacing:-0.3px;z-index:1;}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+/* الكرة الرئيسية */
+.vo-orb-scene{position:relative;width:160px;height:160px;display:flex;align-items:center;justify-content:center;z-index:1;}
+.vo-orb-ring{position:absolute;border-radius:50%;pointer-events:none;}
+.vo-orb-ring-1{inset:-12px;border:1.5px solid rgba(108,143,255,0.2);animation:orbRing1 2s ease-in-out infinite;}
+.vo-orb-ring-2{inset:-24px;border:1px solid rgba(108,143,255,0.1);animation:orbRing1 2s ease-in-out infinite 0.3s;}
+.vo-orb-ring-3{inset:-38px;border:1px solid rgba(108,143,255,0.06);animation:orbRing1 2s ease-in-out infinite 0.6s;}
+@keyframes orbRing1{0%,100%{transform:scale(1);opacity:0.7}50%{transform:scale(1.04);opacity:1}}
+.vo-orb{width:120px;height:120px;border-radius:50%;
+  background:linear-gradient(135deg,var(--a1),var(--a2));
+  display:flex;align-items:center;justify-content:center;font-size:46px;
+  box-shadow:0 0 40px var(--glow),0 0 80px var(--glow2),0 0 120px rgba(108,143,255,0.1);
+  cursor:pointer;transition:all 0.3s;position:relative;}
+.vo-orb.listening{
+  background:linear-gradient(135deg,#00b890,var(--grn));
+  box-shadow:0 0 40px var(--glow3),0 0 80px rgba(0,229,176,0.3);}
+.vo-orb.speaking{
+  background:linear-gradient(135deg,#ff7a2f,var(--a4));
+  box-shadow:0 0 40px rgba(255,159,90,0.4),0 0 80px rgba(255,159,90,0.2);}
+.vo-orb.speaking .vo-orb-ring-1{border-color:rgba(255,159,90,0.35);animation:orbRingSpeaking 0.6s ease-in-out infinite;}
+.vo-orb.speaking .vo-orb-ring-2{border-color:rgba(255,159,90,0.2);animation:orbRingSpeaking 0.6s ease-in-out infinite 0.15s;}
+.vo-orb.speaking .vo-orb-ring-3{border-color:rgba(255,159,90,0.1);animation:orbRingSpeaking 0.6s ease-in-out infinite 0.3s;}
+@keyframes orbRingSpeaking{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.vo-orb.listening .vo-orb-ring-1{border-color:rgba(0,229,176,0.4);}
+.vo-orb.listening .vo-orb-ring-2{border-color:rgba(0,229,176,0.2);}
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+/* تموجات صوتية أثناء الكلام */
+.vo-waves{display:flex;align-items:center;gap:4px;height:40px;z-index:1;}
+.vo-bar{width:4px;border-radius:4px;background:linear-gradient(180deg,var(--a1),var(--a2));
+  transition:height 0.1s ease;animation:waveidle 1.5s ease-in-out infinite;}
+.vo-bar:nth-child(1){animation-delay:0s;height:8px;}
+.vo-bar:nth-child(2){animation-delay:0.1s;height:14px;}
+.vo-bar:nth-child(3){animation-delay:0.2s;height:20px;}
+.vo-bar:nth-child(4){animation-delay:0.3s;height:28px;}
+.vo-bar:nth-child(5){animation-delay:0.4s;height:34px;}
+.vo-bar:nth-child(6){animation-delay:0.3s;height:28px;}
+.vo-bar:nth-child(7){animation-delay:0.2s;height:20px;}
+.vo-bar:nth-child(8){animation-delay:0.1s;height:14px;}
+.vo-bar:nth-child(9){animation-delay:0s;height:8px;}
+@keyframes waveidle{0%,100%{transform:scaleY(0.4);opacity:0.3}50%{transform:scaleY(1);opacity:0.7}}
+.vo-waves.speaking .vo-bar{background:linear-gradient(180deg,#ff9f5a,#ff6b2f);animation:wavespeak 0.5s ease-in-out infinite;}
+.vo-waves.speaking .vo-bar:nth-child(1){animation-delay:0s;}
+.vo-waves.speaking .vo-bar:nth-child(2){animation-delay:0.06s;}
+.vo-waves.speaking .vo-bar:nth-child(3){animation-delay:0.12s;}
+.vo-waves.speaking .vo-bar:nth-child(4){animation-delay:0.18s;}
+.vo-waves.speaking .vo-bar:nth-child(5){animation-delay:0.1s;}
+.vo-waves.speaking .vo-bar:nth-child(6){animation-delay:0.18s;}
+.vo-waves.speaking .vo-bar:nth-child(7){animation-delay:0.12s;}
+.vo-waves.speaking .vo-bar:nth-child(8){animation-delay:0.06s;}
+.vo-waves.speaking .vo-bar:nth-child(9){animation-delay:0s;}
+@keyframes wavespeak{0%,100%{transform:scaleY(0.3)}50%{transform:scaleY(1)}}
+.vo-waves.listening .vo-bar{background:linear-gradient(180deg,var(--grn),#00b890);animation:wavelisten 0.4s ease-in-out infinite;}
+@keyframes wavelisten{0%,100%{transform:scaleY(0.2)}50%{transform:scaleY(1)}}
 
-# ══ System Prompt ══
-SYSTEM_PROMPT = """أنت Groq Chat، مساعد ذكاء اصطناعي متطور ومتعدد القدرات.
+.vo-status{font-size:0.8rem;color:var(--mu);font-family:'JetBrains Mono',monospace;z-index:1;min-height:18px;}
+.vo-transcript{max-width:460px;width:88%;background:rgba(255,255,255,0.04);
+  border:1px solid var(--b2);border-radius:16px;padding:14px 18px;
+  font-size:0.9rem;line-height:1.7;color:var(--tx);text-align:center;
+  min-height:60px;display:flex;align-items:center;justify-content:center;z-index:1;}
+.vo-speed{display:flex;align-items:center;gap:10px;background:rgba(108,143,255,0.06);
+  border:1px solid rgba(108,143,255,0.14);border-radius:10px;padding:8px 16px;z-index:1;}
+.vo-speed-lbl{font-size:0.68rem;color:var(--mu);font-family:'JetBrains Mono',monospace;}
+.vo-speed-val{font-size:0.76rem;color:var(--a1);font-family:'JetBrains Mono',monospace;min-width:30px;}
+input#voSpeedSlider{-webkit-appearance:none;width:100px;height:3px;border-radius:2px;background:var(--b2);outline:none;cursor:pointer;}
+input#voSpeedSlider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:linear-gradient(135deg,var(--a1),var(--a2));box-shadow:0 0 8px var(--glow);}
+.vo-close{background:rgba(255,107,107,0.08);border:1px solid rgba(255,107,107,0.2);
+  border-radius:12px;padding:9px 28px;color:var(--red);font-family:'Tajawal',sans-serif;
+  font-size:0.86rem;cursor:pointer;transition:all 0.2s;z-index:1;}
+.vo-close:hover{background:rgba(255,107,107,0.15);}
 
-قدراتك الفعلية:
-- تحليل الملفات: PDF, Word, Excel, CSV, الصور
-- البحث في الإنترنت: عندما يطلب المستخدم البحث أو الأخبار
-- استخراج نصوص فيديوهات يوتيوب: عندما يرسل المستخدم رابط يوتيوب
-- قراءة محتوى المواقع: عندما يرسل المستخدم رابط موقع
-- التحدث والاستماع بالصوت
 
-قواعد مهمة:
-- لا تقل أبداً "لا أستطيع الوصول للإنترنت" لأنك تستطيع ذلك عبر الأدوات المتاحة
-- عندما يرسل المستخدم رابط يوتيوب، النص سيُستخرج تلقائياً وسيصلك في السياق
-- عندما يطلب البحث، النتائج ستصلك تلقائياً في السياق
-- أجب دائماً بالعربية ما لم يطلب المستخدم غير ذلك
-- كن مختصراً وواضحاً في إجاباتك
-- أنت تعمل على Railway"""
 
-# ══ استخراج النص من الملفات ══
+/* MESSAGES */
+#msgs{flex:1;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:16px;min-height:0;}
+#msgs::-webkit-scrollbar{width:3px;}
+#msgs::-webkit-scrollbar-thumb{background:var(--b2);border-radius:3px;}
 
-def extract_pdf(data: bytes) -> str:
-    text = ""
-    try:
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            for page in pdf.pages:
-                t = page.extract_text()
-                if t:
-                    text += t + "\n"
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        text += " | ".join([str(c) for c in row if c]) + "\n"
-    except:
-        try:
-            reader = pypdf.PdfReader(io.BytesIO(data))
-            for page in reader.pages:
-                text += page.extract_text() or ""
-        except:
-            pass
-    return text[:8000] if text else "[لم يتم استخراج نص من PDF]"
+#welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:20px;padding:40px 20px;flex:1;min-height:60vh;}
+.w-orb{width:80px;height:80px;border-radius:50%;
+  background:linear-gradient(135deg,var(--a1),var(--a2),var(--a3));
+  display:flex;align-items:center;justify-content:center;font-size:32px;
+  box-shadow:0 0 60px var(--glow),0 0 100px var(--glow2);
+  animation:float 4s ease-in-out infinite;background-size:200%;
+  animation:float 4s ease-in-out infinite,gradShift 4s ease infinite;}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.w-title{font-size:1.7rem;font-weight:900;
+  background:linear-gradient(135deg,var(--a1),var(--a2),var(--a3));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-size:200%;animation:gradShift 4s ease infinite;letter-spacing:-0.5px;}
+.w-sub{font-size:0.84rem;color:var(--mu);max-width:360px;line-height:1.8;}
+.w-chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:520px;}
+.w-chip{background:var(--s2);border:1px solid var(--b2);border-radius:22px;
+  padding:7px 16px;font-size:0.78rem;color:var(--mu);cursor:pointer;
+  font-family:'Tajawal',sans-serif;transition:all 0.2s;}
+.w-chip:hover{border-color:var(--a1);color:var(--a1);transform:translateY(-2px);
+  box-shadow:0 4px 16px var(--glow);}
+.w-fts{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;}
+.w-ft{background:var(--s2);border:1px solid var(--b1);border-radius:6px;
+  padding:3px 11px;font-size:0.64rem;color:var(--di);font-family:'JetBrains Mono',monospace;}
 
-def extract_docx(data: bytes) -> str:
-    doc = Document(io.BytesIO(data))
-    text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-    for table in doc.tables:
-        for row in table.rows:
-            text += " | ".join([c.text.strip() for c in row.cells]) + "\n"
-    return text[:8000]
+.mrow{display:flex;gap:10px;animation:fadeUp 0.2s ease forwards;max-width:840px;width:100%;margin:0 auto;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.mrow.user{flex-direction:row-reverse;}
+.av{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;align-self:flex-start;margin-top:2px;}
+.av.u{background:linear-gradient(135deg,#2040c0,#1530a0);color:#fff;font-size:13px;}
+.av.a{background:linear-gradient(135deg,var(--a1),var(--a2));
+  font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;color:#fff;
+  box-shadow:0 0 14px var(--glow);}
+.bwrap{display:flex;flex-direction:column;max-width:calc(100% - 44px);}
+.bubble{padding:12px 16px;border-radius:16px;font-size:0.87rem;line-height:1.8;word-break:break-word;}
+.mrow.user .bubble{background:linear-gradient(135deg,rgba(108,143,255,0.1),rgba(165,107,255,0.08));
+  border:1px solid rgba(108,143,255,0.2);border-radius:16px 4px 16px 16px;}
+.mrow.ai .bubble{background:rgba(255,255,255,0.03);border:1px solid var(--b2);
+  border-radius:4px 16px 16px 16px;}
+.bubble code{font-family:'JetBrains Mono',monospace;font-size:0.76rem;
+  background:rgba(108,143,255,0.1);padding:1px 6px;border-radius:4px;color:#b0c4ff;}
+.file-card{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,0.02);
+  border:1px solid var(--b2);border-radius:9px;padding:8px 12px;margin-bottom:8px;}
+.fc-icon{font-size:20px;flex-shrink:0;}
+.fc-info{flex:1;min-width:0;}
+.fc-name{font-size:0.77rem;color:var(--tx);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fc-meta{font-size:0.62rem;color:var(--di);font-family:'JetBrains Mono',monospace;margin-top:1px;}
+.fc-ok{background:rgba(0,229,176,0.07);border:1px solid rgba(0,229,176,0.18);
+  border-radius:5px;padding:2px 7px;font-size:0.59rem;color:var(--grn);
+  font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+.up-prog{display:flex;align-items:center;gap:8px;background:rgba(108,143,255,0.05);
+  border:1px solid rgba(108,143,255,0.12);border-radius:9px;padding:8px 12px;
+  margin-bottom:8px;font-size:0.76rem;color:var(--a1);}
+.up-spin{width:13px;height:13px;border:2px solid rgba(108,143,255,0.2);
+  border-top-color:var(--a1);border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bmeta{font-size:0.58rem;color:var(--di);font-family:'JetBrains Mono',monospace;
+  margin-top:5px;padding:0 3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.mrow.user .bmeta{justify-content:flex-end;}
+.copy-btn,.speak-btn{background:none;border:1px solid var(--b1);border-radius:5px;
+  padding:2px 8px;font-size:0.57rem;color:var(--di);cursor:pointer;
+  font-family:'JetBrains Mono',monospace;transition:all 0.15s;opacity:0;}
+.mrow:hover .copy-btn,.mrow:hover .speak-btn{opacity:1;}
+.copy-btn:hover{background:var(--s2);color:var(--mu);}
+.speak-btn:hover{background:rgba(108,143,255,0.1);color:var(--a1);}
+.typing-row{display:flex;gap:10px;max-width:840px;width:100%;margin:0 auto;}
+.t-dots{display:flex;align-items:center;gap:5px;padding:13px 17px;
+  background:rgba(255,255,255,0.03);border:1px solid var(--b2);
+  border-radius:4px 16px 16px 16px;}
+.td{width:5px;height:5px;background:var(--a1);border-radius:50%;animation:tdot 1.2s infinite;}
+.td:nth-child(2){animation-delay:.2s}.td:nth-child(3){animation-delay:.4s}
+@keyframes tdot{0%,60%,100%{transform:translateY(0);opacity:.3}30%{transform:translateY(-5px);opacity:1}}
 
-def extract_excel(data: bytes) -> str:
-    try:
-        df_dict = pd.read_excel(io.BytesIO(data), sheet_name=None)
-        text = ""
-        for sheet_name, df in df_dict.items():
-            text += f"\n[ورقة: {sheet_name}]\n"
-            text += f"الأبعاد: {df.shape[0]} صف × {df.shape[1]} عمود\n"
-            text += f"الأعمدة: {', '.join([str(c) for c in df.columns])}\n"
-            text += df.to_string(max_rows=50) + "\n"
-            numeric_cols = df.select_dtypes(include=[np.number])
-            if not numeric_cols.empty:
-                text += "\nإحصائيات:\n" + numeric_cols.describe().to_string() + "\n"
-        return text[:8000]
-    except:
-        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
-        text = ""
-        for sheet in wb.sheetnames:
-            ws = wb[sheet]
-            text += f"\n[ورقة: {sheet}]\n"
-            for row in ws.iter_rows(values_only=True):
-                vals = [str(v) for v in row if v is not None]
-                if vals:
-                    text += " | ".join(vals) + "\n"
-        return text[:8000]
+/* INPUT */
+.input-area{background:rgba(7,8,15,0.92);backdrop-filter:blur(28px);
+  border-top:1px solid var(--b1);padding:12px 16px 14px;flex-shrink:0;}
+.file-bar{display:none;align-items:center;gap:8px;background:var(--s2);
+  border:1px solid var(--b2);border-radius:10px;padding:7px 12px;margin-bottom:9px;
+  max-width:840px;margin-left:auto;margin-right:auto;}
+.file-bar.show{display:flex;}
+.fb-icon{font-size:16px;flex-shrink:0;}
+.fb-info{flex:1;min-width:0;}
+.fb-name{font-size:0.77rem;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fb-size{font-size:0.6rem;color:var(--di);font-family:'JetBrains Mono',monospace;}
+.fb-x{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;opacity:0.7;}
+.fb-x:hover{opacity:1;}
+.ibox{max-width:840px;margin:0 auto;background:var(--s2);
+  border:1px solid var(--b2);border-radius:18px;padding:8px 10px;
+  display:flex;align-items:flex-end;gap:6px;transition:all 0.25s;}
+.ibox:focus-within{border-color:var(--a1);box-shadow:0 0 0 3px var(--glow);}
+.iside{display:flex;gap:2px;align-items:flex-end;padding-bottom:1px;}
+.ibtn{width:32px;height:32px;background:none;border:none;border-radius:8px;
+  color:var(--di);cursor:pointer;font-size:16px;display:flex;align-items:center;
+  justify-content:center;transition:all 0.15s;flex-shrink:0;}
+.ibtn:hover{background:var(--s3);color:var(--mu);}
+.ibtn.rec{color:var(--red);animation:recblink 0.8s infinite;}
+@keyframes recblink{0%,100%{opacity:1}50%{opacity:0.2}}
+.voice-orb-btn{width:36px;height:36px;background:rgba(0,229,176,0.08);
+  border:1px solid rgba(0,229,176,0.22);border-radius:10px;
+  color:var(--grn);cursor:pointer;font-size:17px;display:flex;align-items:center;
+  justify-content:center;transition:all 0.2s;flex-shrink:0;}
+.voice-orb-btn:hover{background:rgba(0,229,176,0.16);border-color:rgba(0,229,176,0.4);}
+textarea#ti{flex:1;background:none;border:none;outline:none;color:var(--tx);
+  font-family:'Tajawal',sans-serif;font-size:0.88rem;line-height:1.65;
+  resize:none;min-height:24px;max-height:140px;overflow-y:auto;direction:rtl;padding:3px 0;}
+textarea#ti::placeholder{color:var(--di);}
+.sbtn{width:36px;height:36px;background:linear-gradient(135deg,var(--a1),var(--a2));
+  border:none;border-radius:10px;cursor:pointer;color:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 16px var(--glow);transition:all 0.2s;}
+.sbtn:hover:not(:disabled){transform:scale(1.08);box-shadow:0 6px 24px var(--glow);}
+.sbtn:disabled{opacity:0.25;cursor:not-allowed;transform:none;}
+.ihint{max-width:840px;margin:5px auto 0;font-size:0.56rem;color:var(--di);
+  font-family:'JetBrains Mono',monospace;text-align:center;}
 
-def extract_csv(data: bytes) -> str:
-    try:
-        df = pd.read_csv(io.BytesIO(data))
-        text = f"عدد الصفوف: {len(df)}\n"
-        text += f"الأعمدة: {', '.join(df.columns)}\n"
-        text += df.to_string(max_rows=50) + "\n"
-        numeric_cols = df.select_dtypes(include=[np.number])
-        if not numeric_cols.empty:
-            text += "\nإحصائيات:\n" + numeric_cols.describe().to_string()
-        return text[:8000]
-    except:
-        return data.decode("utf-8", errors="ignore")[:8000]
+#toast{position:fixed;bottom:82px;left:50%;transform:translateX(-50%) translateY(10px);
+  background:var(--s2);border:1px solid var(--b2);color:var(--tx);
+  padding:8px 18px;border-radius:10px;font-size:0.72rem;
+  font-family:'JetBrains Mono',monospace;opacity:0;pointer-events:none;
+  transition:all 0.28s;z-index:999;white-space:nowrap;box-shadow:0 8px 28px rgba(0,0,0,0.5);}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99;backdrop-filter:blur(4px);}
+#overlay.show{display:block;}
 
-def extract_image(data: bytes, filename: str) -> str:
-    if OCR_AVAILABLE:
-        try:
-            img = Image.open(io.BytesIO(data))
-            text = pytesseract.image_to_string(img, lang='ara+eng')
-            if text.strip():
-                return f"[نص مستخرج من الصورة عبر OCR]\n{text}"
-        except:
-            pass
-    return "__IMAGE__"
+@media(max-width:720px){
+  #sidebar{position:fixed;top:0;right:0;height:100%;transform:translateX(110%);z-index:100;}
+  #sidebar.open{transform:translateX(0);}
+  #menuBtn{display:flex!important;}
+  #msgs{padding:14px 10px;}
+  .input-area{padding:9px 10px 12px;}
+  .dash-btn span,.speed-wrap{display:none;}
+}
+input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="bg-aurora"></div>
+<div class="bg-aurora2"></div>
+<div class="bg-dots"></div>
 
-def extract_text(filename: str, data: bytes) -> str:
-    ext = filename.lower().split(".")[-1]
-    if ext == "pdf":                         return extract_pdf(data)
-    elif ext == "docx":                      return extract_docx(data)
-    elif ext in ("xlsx", "xls"):             return extract_excel(data)
-    elif ext == "csv":                       return extract_csv(data)
-    elif ext in ("jpg","jpeg","png","webp"): return extract_image(data, filename)
-    elif ext in ("txt", "md"):               return data.decode("utf-8", errors="ignore")[:8000]
-    return ""
+<aside id="sidebar">
+  <div class="sb-head">
+    <div class="brand">
+      <div class="brand-logo">GQ</div>
+      <div class="brand-name">Groq Chat</div>
+    </div>
+    <button class="new-btn" onclick="newChat()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      محادثة جديدة
+    </button>
+  </div>
+  <div class="sb-hist" id="sbHistory"><div class="sb-lbl">المحادثات</div></div>
+  <div class="sb-foot">
+    <label for="modelSel">النموذج</label>
+    <select id="modelSel" onchange="onModelChange()">
+      <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+      <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+      <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+      <option value="gemma2-9b-it">gemma2-9b-it</option>
+    </select>
+  </div>
+</aside>
 
-# ══ استخراج نص من موقع ══
-async def scrape_url(url: str) -> str:
-    try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True, verify=False, headers={"User-Agent":"Mozilla/5.0"}) as c:
+<div id="main">
+  <div class="topbar">
+    <div class="tb-left">
+      <button id="menuBtn" onclick="toggleSidebar()">☰</button>
+      <div>
+        <div class="tb-title" id="topTitle">محادثة جديدة</div>
+        <div class="tb-sub" id="topSub">groq · llama-3.3-70b</div>
+      </div>
+    </div>
+    <div class="tb-right">
+      <div class="online-badge"><div class="pulse"></div><span>متصل</span></div>
+      <div class="speed-wrap">
+        <span class="speed-lbl">🔊</span>
+        <input type="range" id="speedSlider" min="0.5" max="2" step="0.1" value="1" oninput="onSpeedChange(this.value)">
+        <span class="speed-val" id="speedVal">1.0×</span>
+      </div>
+      <div class="voice-select-wrap">
+        <span class="voice-select-lbl">🌍</span>
+        <select id="voiceSel" onchange="onVoiceChange(this.value)">
+          <option value="ar-SA-ZariyahNeural">🇸🇦 سعودي ♀</option>
+          <option value="ar-SA-HamedNeural">🇸🇦 سعودي ♂</option>
+          <option value="ar-EG-SalmaNeural">🇪🇬 مصري ♀</option>
+          <option value="ar-EG-ShakirNeural">🇪🇬 مصري ♂</option>
+          <option value="ar-DZ-AminaNeural">🇩🇿 جزائري ♀</option>
+          <option value="ar-DZ-IsmaelNeural">🇩🇿 جزائري ♂</option>
+          <option value="ar-AE-FatimaNeural">🇦🇪 إماراتي ♀</option>
+          <option value="ar-MA-MounaNeural">🇲🇦 مغربي ♀</option>
+          <option value="ar-IQ-RanaNeural">🇮🇶 عراقي ♀</option>
+          <option value="ar-KW-FahedNeural">🇰🇼 كويتي ♂</option>
+          <option value="ar-SY-AmanyNeural">🇸🇾 سوري ♀</option>
+        </select>
+      </div>
+      <button class="tb-voice-btn" id="voiceModeBtn" onclick="openVoiceMode()">🎙 <span>صوت</span></button>
+      <button class="dash-btn" onclick="window.location.href='dashboard.html'">← <span>لوحة التحكم</span></button>
+      <button class="icon-btn" onclick="clearChat()" title="مسح">🗑</button>
+    </div>
+  </div>
 
-            resp = await c.get(url)
-            soup = BeautifulSoup(resp.text, "html.parser")
-            for tag in soup(["script","style","nav","footer","header","aside"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.splitlines() if len(l.strip()) > 30]
-            return "\n".join(lines)[:6000]
-    except Exception as e:
-        return f"[خطأ في قراءة الموقع: {str(e)}]"
+  <div id="msgs">
+    <div id="welcome">
+      <div class="w-orb">⚡</div>
+      <div class="w-title">مرحباً في Groq Chat</div>
+      <div class="w-sub">اسأل أي شيء · أرفق ملفاً · ابحث في الإنترنت · أو تحدث صوتياً</div>
+      <div class="w-chips">
+        <div class="w-chip" onclick="suggest(this)">ابحث عن أخبار اليوم</div>
+        <div class="w-chip" onclick="suggest(this)">لخص هذا الفيديو: [رابط يوتيوب]</div>
+        <div class="w-chip" onclick="suggest(this)">اكتب كوداً بلغة Python</div>
+        <div class="w-chip" onclick="suggest(this)">ترجم نصاً للإنجليزية</div>
+        <div class="w-chip" onclick="suggest(this)">حلل هذه البيانات</div>
+      </div>
+      <div class="w-fts">
+        <div class="w-ft">🔍 بحث</div><div class="w-ft">📄 PDF</div>
+        <div class="w-ft">📝 Word</div><div class="w-ft">📊 Excel</div>
+        <div class="w-ft">🖼 صور</div><div class="w-ft">▶️ يوتيوب</div><div class="w-ft">🎙 صوت</div>
+      </div>
+    </div>
+  </div>
 
-# ══ Models ══
-class ChatRequest(BaseModel):
-    messages: list
-    model: str = "llama-3.3-70b-versatile"
+  <div class="input-area">
+    <div class="file-bar" id="fileBar">
+      <span class="fb-icon" id="fileIcon">📎</span>
+      <div class="fb-info"><div class="fb-name" id="fileName">—</div><div class="fb-size" id="fileSize">—</div></div>
+      <button class="fb-x" onclick="removeFile()">×</button>
+    </div>
+    <div class="ibox">
+      <div class="iside">
+        <button class="ibtn" onclick="document.getElementById('fi').click()" title="إرفاق ملف">📎</button>
+        <button class="ibtn" id="micBtn" onclick="toggleMic()" title="إملاء صوتي في مربع النص">🎤</button>
+      </div>
+      <textarea id="ti" placeholder="اكتب رسالتك، أو رابط يوتيوب، أو: ابحث عن..." rows="1"
+        onkeydown="handleKey(event)" oninput="resize(this)"></textarea>
+      <button class="voice-orb-btn" onclick="openVoiceMode()" title="وضع الدردشة الصوتية">🎙</button>
+      <button class="sbtn" id="sendBtn" onclick="send()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ihint">Enter إرسال · Shift+Enter سطر جديد · 🎤 إملاء في النص · 🎙 دردشة صوتية</div>
+  </div>
+</div>
 
-class SearchRequest(BaseModel):
-    query: str
-    max_results: int = 5
+<!-- VOICE OVERLAY -->
+<div id="voiceOverlay">
+  <div class="vo-bg-rings">
+    <div class="vo-bg-ring"></div><div class="vo-bg-ring"></div>
+    <div class="vo-bg-ring"></div><div class="vo-bg-ring"></div>
+  </div>
+  <div class="vo-title">🎙 الدردشة الصوتية</div>
+  <div class="vo-orb-scene">
+    <div class="vo-orb-ring vo-orb-ring-1"></div>
+    <div class="vo-orb-ring vo-orb-ring-2"></div>
+    <div class="vo-orb-ring vo-orb-ring-3"></div>
+    <div class="vo-orb" id="voOrb" onclick="orbTap()">🎤</div>
+  </div>
+  <div class="vo-waves" id="voWaves">
+    <div class="vo-bar"></div><div class="vo-bar"></div><div class="vo-bar"></div>
+    <div class="vo-bar"></div><div class="vo-bar"></div><div class="vo-bar"></div>
+    <div class="vo-bar"></div><div class="vo-bar"></div><div class="vo-bar"></div>
+  </div>
+  <div class="vo-status" id="voStatus">اضغط الكرة للبدء</div>
+  <div class="vo-transcript" id="voTranscript">سيظهر هنا ما تقوله...</div>
+  <div class="vo-speed">
+    <span class="vo-speed-lbl">سرعة الصوت</span>
+    <input type="range" id="voSpeedSlider" min="0.5" max="2" step="0.1" value="1" oninput="onSpeedChange(this.value,true)">
+    <span class="vo-speed-val" id="voSpeedVal">1.0×</span>
+  </div>
+  <button class="vo-close" onclick="closeVoiceMode()">✕ إغلاق وضع الصوت</button>
+</div>
 
-class TTSRequest(BaseModel):
-    text: str
-    lang: str = "ar"
-    speed: float = 1.0
-    voice: str = "ar-SA-ZariyahNeural"
+<div id="overlay" onclick="closeSidebar()"></div>
+<div id="toast"></div>
+<input type="file" id="fi" accept=".pdf,.docx,.xlsx,.xls,.txt,.csv,.jpg,.jpeg,.png,.webp" onchange="onFile(event)">
 
-VALID_VOICES = {
-    "ar-SA-ZariyahNeural","ar-SA-HamedNeural",
-    "ar-EG-SalmaNeural","ar-EG-ShakirNeural",
-    "ar-DZ-AminaNeural","ar-DZ-IsmaelNeural",
-    "ar-AE-FatimaNeural","ar-AE-HamdanNeural",
-    "ar-MA-MounaNeural","ar-MA-JamalNeural",
-    "ar-IQ-RanaNeural","ar-IQ-BasselNeural",
-    "ar-LY-ImanNeural","ar-TN-HediNeural",
-    "ar-KW-FahedNeural","ar-SY-AmanyNeural",
+<script>
+const API    = 'https://chat-groq-production.up.railway.app/api/chat';
+const UPLOAD = 'https://chat-groq-production.up.railway.app/api/upload';
+const SEARCH = 'https://chat-groq-production.up.railway.app/api/search';
+const TTS    = 'https://chat-groq-production.up.railway.app/api/tts';
+const YT     = 'https://chat-groq-production.up.railway.app/api/youtube';
+
+const SUPABASE_URL='https://wseciakcqfwymxbrshju.supabase.co';
+const SUPABASE_KEY='sb_publishable__NqfCiD2dgqopQ0z4G-Dfg_BXXv9Hga';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const FILE_ICONS={pdf:'📄',docx:'📝',doc:'📝',xlsx:'📊',xls:'📊',txt:'📃',csv:'📊',jpg:'🖼',jpeg:'🖼',png:'🖼',webp:'🖼'};
+function fIcon(n){const e=n.split('.').pop().toLowerCase();return FILE_ICONS[e]||'📎';}
+function fmtSize(b){if(b<1024)return b+'B';if(b<1048576)return(b/1024).toFixed(1)+'KB';return(b/1048576).toFixed(1)+'MB';}
+
+let sessions=JSON.parse(localStorage.getItem('gq')||'[]');
+let aid=null,busy=false,pFile=null;
+let voiceMode=false,voiceListening=false;
+let voiceAudio=null,voiceRec=null;
+let micRec=null,recOn=false;
+let silenceTimer=null,finalTranscript='';
+let ttsSpeed=1.0;
+let ttsVoice='ar-SA-ZariyahNeural';
+let botSpeaking=false; // ← مفتاح منع التكرار
+
+function onSpeedChange(val,fromOverlay){
+  ttsSpeed=parseFloat(val);
+  document.getElementById('speedSlider').value=val;
+  document.getElementById('voSpeedSlider').value=val;
+  document.getElementById('speedVal').textContent=parseFloat(val).toFixed(1)+'×';
+  document.getElementById('voSpeedVal').textContent=parseFloat(val).toFixed(1)+'×';
+  if(voiceAudio)voiceAudio.playbackRate=ttsSpeed;
 }
 
-class YouTubeRequest(BaseModel):
-    url: str
+function onVoiceChange(v){
+  ttsVoice=v;
+  toast('🎙 تم تغيير الصوت: '+document.getElementById('voiceSel').selectedOptions[0].text);
+}
+function onVoiceChange(v){ttsVoice=v;toast('🎙 '+document.getElementById('voiceSel').selectedOptions[0].text);}
+function gs(id){return sessions.find(s=>s.id===id);}
+function save(){localStorage.setItem('gq',JSON.stringify(sessions));}
 
-class ScrapeRequest(BaseModel):
-    url: str
+async function init(){
+  try{const{data:{session}}=await sb.auth.getSession();if(!session){window.location.href='index.html';return;}}catch(e){}
+  renderSB();
+  if(sessions.length)loadSession(sessions[0].id);
+}
 
-# ══ Endpoints ══
+function newChat(){
+  const id='c'+Date.now();
+  sessions.unshift({id,title:'محادثة جديدة',msgs:[],model:'llama-3.3-70b-versatile'});
+  save();loadSession(id);renderSB();closeSidebar();
+}
 
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
-    messages = list(req.messages)
-    if not messages or messages[0].get("role") != "system":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    response = client.chat.completions.create(
-        model=req.model,
-        messages=messages,
-        max_tokens=1500,
-    )
-    return {"reply": response.choices[0].message.content}
+function loadSession(id){
+  aid=id;const s=gs(id);if(!s)return;
+  document.getElementById('modelSel').value=s.model;
+  document.getElementById('topTitle').textContent=s.title;
+  document.getElementById('topSub').textContent='groq · '+s.model.split('-').slice(0,2).join('-');
+  renderMsgs(s.msgs);renderSB();
+}
 
-@app.post("/api/upload")
-async def upload(file: UploadFile = File(...)):
-    data = await file.read()
-    text = extract_text(file.filename, data)
-    if text == "__IMAGE__":
-        b64 = base64.b64encode(data).decode()
-        ext = file.filename.lower().split(".")[-1]
-        mime = "image/jpeg" if ext in ("jpg","jpeg") else f"image/{ext}"
-        response = client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
-            messages=[{"role":"user","content":[
-                {"type":"image_url","image_url":{"url":f"data:{mime};base64,{b64}"}},
-                {"type":"text","text":"صف محتوى هذه الصورة بالتفصيل بالعربية"}
-            ]}],
-            max_tokens=1024
-        )
-        return {"text": response.choices[0].message.content, "filename": file.filename, "type": "image"}
-    if not text:
-        return {"text": "", "filename": file.filename, "message": "لم يتم استخراج نص"}
-    return {"text": text, "filename": file.filename, "type": "document"}
+function delSession(id,e){
+  e.stopPropagation();sessions=sessions.filter(s=>s.id!==id);save();
+  if(aid===id){aid=null;showWelcome();}renderSB();
+}
 
-@app.post("/api/search")
-async def search(req: SearchRequest):
-    results = []
+function clearChat(){
+  if(!aid)return;gs(aid).msgs=[];gs(aid).title='محادثة جديدة';save();
+  showWelcome();document.getElementById('topTitle').textContent='محادثة جديدة';
+}
 
-    # ══ محاولة 1: DuckDuckGo ══
-    try:
-        with DDGS() as ddgs:
-            for r in ddgs.text(req.query, max_results=req.max_results):
-                results.append(f"• {r['title']}\n{r['body']}\n{r['href']}")
-        if results:
-            return {"results": "\n\n".join(results), "count": len(results), "source": "duckduckgo"}
-    except Exception as e:
-        pass
+function renderSB(){
+  const el=document.getElementById('sbHistory');
+  el.innerHTML='<div class="sb-lbl">المحادثات</div>';
+  if(!sessions.length){el.innerHTML+='<div style="padding:10px 8px;font-size:0.76rem;color:var(--di)">لا توجد محادثات</div>';return;}
+  sessions.forEach(s=>{
+    const d=document.createElement('div');
+    d.className='h-item'+(s.id===aid?' active':'');
+    d.innerHTML=`<span class="h-icon">💬</span><span class="h-txt">${esc(s.title)}</span>
+      <button class="h-del" onclick="delSession('${s.id}',event)">×</button>`;
+    d.onclick=e=>{if(!e.target.classList.contains('h-del')){loadSession(s.id);closeSidebar();}};
+    el.appendChild(d);
+  });
+}
 
-    # ══ محاولة 2: Scrapy عبر httpx (بدون SSL) ══
-    try:
-        search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(req.query)}"
-        async with httpx.AsyncClient(timeout=12, verify=False,
-            headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as c:
-            resp = await c.get(search_url)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        items = soup.select(".result__body")[:req.max_results]
-        for item in items:
-            title_el = item.select_one(".result__title")
-            snippet_el = item.select_one(".result__snippet")
-            url_el = item.select_one(".result__url")
-            title = title_el.get_text(strip=True) if title_el else ""
-            snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-            url = url_el.get_text(strip=True) if url_el else ""
-            if title or snippet:
-                results.append(f"• {title}\n{snippet}\n{url}")
-        if results:
-            return {"results": "\n\n".join(results), "count": len(results), "source": "scrapy_ddg"}
-    except Exception as e:
-        pass
+function showWelcome(){
+  document.getElementById('msgs').innerHTML=`<div id="welcome">
+    <div class="w-orb">⚡</div>
+    <div class="w-title">مرحباً في Groq Chat</div>
+    <div class="w-sub">اسأل أي شيء · أرفق ملفاً · ابحث في الإنترنت · أو تحدث صوتياً</div>
+    <div class="w-chips">
+      <div class="w-chip" onclick="suggest(this)">ابحث عن أخبار اليوم</div>
+      <div class="w-chip" onclick="suggest(this)">لخص هذا الفيديو: [رابط يوتيوب]</div>
+      <div class="w-chip" onclick="suggest(this)">اكتب كوداً بلغة Python</div>
+      <div class="w-chip" onclick="suggest(this)">ترجم نصاً للإنجليزية</div>
+    </div>
+    <div class="w-fts">
+      <div class="w-ft">🔍 بحث</div><div class="w-ft">📄 PDF</div>
+      <div class="w-ft">📝 Word</div><div class="w-ft">📊 Excel</div>
+      <div class="w-ft">🖼 صور</div><div class="w-ft">▶️ يوتيوب</div><div class="w-ft">🎙 صوت</div>
+    </div></div>`;
+}
 
-    # ══ محاولة 3: Google عبر httpx ══
-    try:
-        google_url = f"https://www.google.com/search?q={urllib.parse.quote(req.query)}&hl=ar&num=5"
-        async with httpx.AsyncClient(timeout=12, verify=False,
-            headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as c:
-            resp = await c.get(google_url)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for div in soup.select("div.BNeawe")[:req.max_results]:
-            text = div.get_text(strip=True)
-            if len(text) > 40:
-                results.append(f"• {text}")
-        if results:
-            return {"results": "\n\n".join(results), "count": len(results), "source": "google"}
-    except Exception as e:
-        pass
+function renderMsgs(msgs){
+  const el=document.getElementById('msgs');
+  if(!msgs||!msgs.length){showWelcome();return;}
+  el.innerHTML='';msgs.forEach(m=>addBubble(m.role,m.content,m.fi,false));
+  el.scrollTop=el.scrollHeight;
+}
 
-    return {"results": "", "error": "فشل البحث من جميع المصادر", "count": 0}
+function addBubble(role,text,fi,anim){
+  if(anim===undefined)anim=true;
+  const w=document.getElementById('welcome');if(w)w.remove();
+  const el=document.getElementById('msgs');
+  const isU=role==='user';
+  const t=new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'});
+  const model=document.getElementById('modelSel').value.split('-').slice(0,2).join('-');
+  const d=document.createElement('div');
+  d.className='mrow '+(isU?'user':'ai');
+  if(!anim)d.style.animation='none';
+  let fh='';
+  if(fi)fh=`<div class="file-card"><div class="fc-icon">${fIcon(fi.name)}</div>
+    <div class="fc-info"><div class="fc-name">${esc(fi.name)}</div>
+    <div class="fc-meta">${fi.size||''}</div></div>
+    <div class="fc-ok">✓ تمت القراءة</div></div>`;
+  const speakBtn=!isU?`<button class="speak-btn" onclick="speakText(this)">🔊 استمع</button>`:'';
+  d.innerHTML=`
+    <div class="av ${isU?'u':'a'}">${isU?'👤':'GQ'}</div>
+    <div class="bwrap">
+      <div class="bubble">${fh}<span>${isU?esc(text).replace(/\n/g,'<br>'):formatText(text)}</span></div>
+      <div class="bmeta"><span>${t}${!isU?' · '+model:''}</span>
+        <button class="copy-btn" onclick="copyMsg(this)">نسخ</button>${speakBtn}
+      </div>
+    </div>`;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
 
-@app.post("/api/youtube")
-async def youtube(req: YouTubeRequest):
-    try:
-        url = req.url.strip()
-        video_id = ""
+function addTyping(){
+  const w=document.getElementById('welcome');if(w)w.remove();
+  const el=document.getElementById('msgs');
+  const d=document.createElement('div');d.className='typing-row';d.id='typ';
+  d.innerHTML=`<div class="av a">GQ</div><div class="t-dots"><div class="td"></div><div class="td"></div><div class="td"></div></div>`;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
+function removeTyping(){const t=document.getElementById('typ');if(t)t.remove();}
 
-        if "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0].split("/")[0]
-        elif "youtube.com/watch" in url:
-            params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-            video_id = params.get("v", [""])[0]
-        elif "youtube.com/shorts/" in url:
-            video_id = url.split("youtube.com/shorts/")[1].split("?")[0]
+// ══ تنظيف النص ══
+function cleanText(t){
+  return t
+    .replace(/\*\*(.+?)\*\*/g,'$1').replace(/\*(.+?)\*/g,'$1')
+    .replace(/_{1,2}(.+?)_{1,2}/g,'$1').replace(/`{1,3}[^`]*`{1,3}/g,'')
+    .replace(/#{1,6}\s/g,'').replace(/^[-•*]\s/gm,'')
+    .replace(/\|/g,' ').replace(/[-]{2,}/g,' ').replace(/[_~^]/g,' ')
+    .replace(/\n{2,}/g,'\n').trim();
+}
+function formatText(t){
+  return esc(t)
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/^#{1,3}\s(.+)$/gm,'<span style="font-weight:700;color:var(--tx)">$1</span>')
+    .replace(/^[-•]\s(.+)$/gm,'<span style="display:block;padding-right:10px">· $1</span>')
+    .replace(/\n/g,'<br>');
+}
 
-        video_id = video_id.strip()
-        if not video_id:
-            return {"transcript": "", "error": "رابط غير صحيح"}
+// ══ TTS ENGINE ══
+function splitToChunks(text,maxLen=200){
+  const sentences=text.match(/[^.!?\u060c\u061f\n]+[.!?\u060c\u061f\n]*/g)||[text];
+  const chunks=[];let cur='';
+  for(const s of sentences){
+    if((cur+s).length>maxLen&&cur){chunks.push(cur.trim());cur=s;}
+    else cur+=s;
+  }
+  if(cur.trim())chunks.push(cur.trim());
+  return chunks.filter(c=>c.trim().length>2);
+}
 
-        from youtube_transcript_api import YouTubeTranscriptApi
+async function fetchWithRetry(url,opts,retries=2){
+  for(let i=0;i<=retries;i++){
+    try{const res=await fetch(url,opts);if(res.ok)return res;throw new Error('HTTP '+res.status);}
+    catch(e){if(i===retries)throw e;toast('⟳ إعادة الاتصال...');await new Promise(r=>setTimeout(r,1500));}
+  }
+}
 
-        # ══ محاولة 1: مع Webshare Proxy (إذا كانت متوفرة) ══
-        transcript_text = None
-        WEBSHARE_USER = os.environ.get("WEBSHARE_PROXY_USERNAME", "")
-        WEBSHARE_PASS = os.environ.get("WEBSHARE_PROXY_PASSWORD", "")
+// مقاطعة البوت — تُستدعى من لمس الكرة
+function interruptBot(){
+  if(!botSpeaking)return;
+  botSpeaking=false;
+  ++speakSession;
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
+  const orb=document.getElementById('voOrb');
+  const waves=document.getElementById('voWaves');
+  orb.className='vo-orb';orb.textContent='🎤';
+  waves.className='vo-waves';
+  document.getElementById('voStatus').textContent='أنا أستمع...';
+  setTimeout(()=>{if(voiceMode&&!busy)startVoiceListen();},400);
+}
 
-        if WEBSHARE_USER and WEBSHARE_PASS:
-            try:
-                from youtube_transcript_api.proxies import WebshareProxyConfig
-                ytt = YouTubeTranscriptApi(
-                    proxy_config=WebshareProxyConfig(
-                        proxy_username=WEBSHARE_USER,
-                        proxy_password=WEBSHARE_PASS,
-                    )
-                )
-                for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
-                    try:
-                        fetched = ytt.fetch(video_id, languages=langs)
-                        raw = fetched.to_raw_data()
-                        transcript_text = " ".join([s["text"] for s in raw])
-                        if transcript_text:
-                            break
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+let speakSession=0;
 
-        # ══ محاولة 2: بدون proxy (API الجديد) ══
-        if not transcript_text:
-            try:
-                ytt = YouTubeTranscriptApi()
-                for langs in [["ar"], ["en"], ["ar", "en"], ["fr"]]:
-                    try:
-                        fetched = ytt.fetch(video_id, languages=langs)
-                        raw = fetched.to_raw_data()
-                        transcript_text = " ".join([s["text"] for s in raw])
-                        if transcript_text:
-                            break
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+async function autoSpeak(text){
+  const clean=cleanText(text);if(!clean)return;
+  const chunks=splitToChunks(clean);
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
+  stopVoiceListen();
+  botSpeaking=true;
+  const mySession=++speakSession;
 
-        # ══ محاولة 3: Innertube API مباشرة ══
-        if not transcript_text:
-            try:
-                yt_page_url = f"https://www.youtube.com/watch?v={video_id}"
-                async with httpx.AsyncClient(timeout=15, verify=False,
-                    headers={"User-Agent": "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip"}) as c:
-                    page = await c.get(yt_page_url)
-                    key_match = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', page.text)
-                    if key_match:
-                        api_key = key_match.group(1)
-                        player_resp = await c.post(
-                            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
-                            json={"context": {"client": {"clientName": "ANDROID", "clientVersion": "20.10.38"}},
-                                  "videoId": video_id}
-                        )
-                        data = player_resp.json()
-                        tracks = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
-                        if tracks:
-                            caption_url = tracks[0]["baseUrl"] + "&fmt=json3"
-                            cap_resp = await c.get(caption_url)
-                            cap_data = cap_resp.json()
-                            lines = []
-                            for ev in cap_data.get("events", []):
-                                for seg in ev.get("segs", []):
-                                    t = seg.get("utf8", "").strip()
-                                    if t and t != "\n":
-                                        lines.append(t)
-                            transcript_text = " ".join(lines)
-            except Exception:
-                pass
+  const orb=document.getElementById('voOrb');
+  const waves=document.getElementById('voWaves');
+  if(voiceMode){
+    orb.className='vo-orb speaking';orb.textContent='🔊';
+    waves.className='vo-waves speaking';
+    document.getElementById('voStatus').textContent='البوت يتحدث... (المس الكرة للمقاطعة)';
+  } else {
+    toast('🔊 جاري التشغيل...');
+  }
 
-        # ══ محاولة 4: عنوان + وصف الفيديو كحد أدنى ══
-        if not transcript_text:
-            try:
-                async with httpx.AsyncClient(timeout=10, verify=False,
-                    headers={"User-Agent": "Mozilla/5.0"}) as c:
-                    resp = await c.get(f"https://www.youtube.com/watch?v={video_id}")
-                soup = BeautifulSoup(resp.text, "html.parser")
-                info = []
-                title = soup.find("title")
-                desc = soup.find("meta", {"name": "description"})
-                if title:
-                    info.append(f"عنوان الفيديو: {title.text.replace(' - YouTube', '')}")
-                if desc:
-                    info.append(f"الوصف: {desc.get('content', '')}")
-                if info:
-                    return {"transcript": "\n".join(info), "video_id": video_id, "source": "page_meta",
-                            "note": "لم تتوفر الترجمة — تم استخراج العنوان والوصف فقط"}
-            except Exception:
-                pass
-
-        if not transcript_text:
-            proxy_hint = "" if (WEBSHARE_USER and WEBSHARE_PASS) else " — أضف WEBSHARE_PROXY_USERNAME/PASSWORD في Railway للحصول على نتائج أفضل"
-            return {"transcript": "", "error": f"يوتيوب يحجب السيرفر{proxy_hint}"}
-
-        return {"transcript": transcript_text[:8000], "video_id": video_id, "source": "transcript"}
-
-    except Exception as e:
-        return {"transcript": "", "error": str(e)}
-
-@app.post("/api/scrape")
-async def scrape(req: ScrapeRequest):
-    content = await scrape_url(req.url)
-    return {"content": content, "url": req.url}
-
-@app.post("/api/tts")
-async def tts(req: TTSRequest):
-    from fastapi.responses import Response
-    text = req.text[:800]
-    speed = max(0.5, min(2.0, req.speed))
-    selected_voice = req.voice if req.voice in VALID_VOICES else "ar-SA-ZariyahNeural"
-    rate_percent = int((speed - 1.0) * 100)
-    rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-    CORS_HEADERS = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
+  try{
+    for(let i=0;i<chunks.length;i++){
+      if(!botSpeaking||mySession!==speakSession)break;
+      const res=await fetch(TTS,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:chunks[i],speed:ttsSpeed,voice:ttsVoice})
+      });
+      if(!res.ok||!botSpeaking||mySession!==speakSession)break;
+      const blob=await res.blob();
+      if(!botSpeaking||mySession!==speakSession)break;
+      const url=URL.createObjectURL(blob);
+      const audio=new Audio(url);
+      audio.playbackRate=ttsSpeed;
+      voiceAudio=audio;
+      await new Promise(resolve=>{
+        audio.onended=()=>{URL.revokeObjectURL(url);resolve();};
+        audio.onerror=()=>{URL.revokeObjectURL(url);resolve();};
+        audio.play().catch(resolve);
+      });
+      voiceAudio=null;
     }
+  }catch(e){}
 
-    # المحاولة 1: edge-tts بالصوت المختار
-    if EDGE_TTS_AVAILABLE:
-        for voice in [selected_voice, "ar-SA-ZariyahNeural"]:
-            try:
-                communicate = edge_tts.Communicate(text, voice, rate=rate_str)
-                audio_buf = io.BytesIO()
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_buf.write(chunk["data"])
-                audio_bytes = audio_buf.getvalue()
-                if len(audio_bytes) > 500:
-                    return Response(content=audio_bytes, media_type="audio/mpeg", headers=CORS_HEADERS)
-            except:
-                continue
+  if(mySession===speakSession&&botSpeaking){
+    botSpeaking=false;
+    if(voiceMode){
+      orb.className='vo-orb';orb.textContent='🎤';
+      waves.className='vo-waves';
+      document.getElementById('voStatus').textContent='أنا أستمع...';
+      setTimeout(()=>{if(voiceMode&&!busy&&!botSpeaking)startVoiceListen();},600);
+    }
+  }
+}
 
-    # المحاولة 2: gTTS
-    if GTTS_AVAILABLE:
-        try:
-            tts_obj = gTTS(text=text, lang="ar", slow=False)
-            audio_buf = io.BytesIO()
-            tts_obj.write_to_fp(audio_buf)
-            audio_buf.seek(0)
-            audio_bytes = audio_buf.read()
-            if len(audio_bytes) > 500:
-                return Response(content=audio_bytes, media_type="audio/mpeg", headers=CORS_HEADERS)
-        except:
-            pass
+async function speakText(btn){
+  const text=btn.closest('.bwrap').querySelector('.bubble span').innerText;
+  await autoSpeak(text);
+}
 
-    return Response(content=b"", status_code=500, headers=CORS_HEADERS)
+// ══ SEND ══
+async function send(forcedText){
+  if(busy)return;
+  const ti=document.getElementById('ti');
+  const text=forcedText||ti.value.trim();
+  if(!text&&!pFile)return;
+  if(!aid)newChat();
+  const s=gs(aid);
+  const model=document.getElementById('modelSel').value;
+  const fileObj=pFile;
+  if(!forcedText){ti.value='';ti.style.height='auto';}
+  removeFile();
+  busy=true;document.getElementById('sendBtn').disabled=true;
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "ocr": OCR_AVAILABLE, "edge_tts": EDGE_TTS_AVAILABLE, "platform": "railway"}
+  let fi=null,fileContext='';
+  const ytMatch=text&&text.match(/(https?:\/\/)?(www\.)?(youtube\.com\/(watch|shorts)|youtu\.be\/)[\w\-\?=&]+/);
 
+  if(ytMatch){
+    addBubble('user',text);addTyping();
+    try{
+      let url=ytMatch[0];if(!url.startsWith('http'))url='https://'+url;
+      const res=await fetch(YT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+      const data=await res.json();
+      fileContext=data.transcript?'[نص الفيديو]\n'+data.transcript:'[لا تتوفر ترجمة: '+(data.error||'')+']';
+    }catch(e){fileContext='[خطأ في يوتيوب]';}
+  }
+  else if(fileObj){
+    fi={name:fileObj.name,size:fmtSize(fileObj.size)};
+    const w=document.getElementById('welcome');if(w)w.remove();
+    const el=document.getElementById('msgs');
+    const upDiv=document.createElement('div');upDiv.id='uploading';upDiv.className='mrow user';
+    upDiv.innerHTML=`<div class="av u">👤</div><div class="bwrap"><div class="bubble">
+      <div class="up-prog"><div class="up-spin"></div> جاري قراءة: ${esc(fileObj.name)}</div>
+      ${text?'<span>'+esc(text)+'</span>':''}
+    </div></div>`;
+    el.appendChild(upDiv);el.scrollTop=el.scrollHeight;
+    try{
+      const fd=new FormData();fd.append('file',fileObj);
+      const r=await fetch(UPLOAD,{method:'POST',body:fd});
+      const data=await r.json();fileContext=data.text||'';
+    }catch(e){fileContext='[تعذّر قراءة الملف]';}
+    const upEl=document.getElementById('uploading');if(upEl)upEl.remove();
+    addBubble('user',text||'اقرأ هذا الملف',fi);addTyping();
+  }
+  else if(text&&(text.match(/^(ابحث|search)/i)||text.includes('أخبار')||text.includes('اخبار'))){
+    addBubble('user',text);addTyping();
+    try{
+      const q=text.replace(/^(ابحث عن|ابحث|search about|search)\s*/i,'');
+      const res=await fetch(SEARCH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+      const data=await res.json();
+      fileContext=data.results||'';
+      if(data.source_label&&data.count>0){
+        const srcBadge=document.createElement('div');
+        srcBadge.style.cssText='font-size:0.62rem;color:#5f6a88;font-family:JetBrains Mono,monospace;padding:2px 8px;margin-top:4px;';
+        srcBadge.textContent='تم البحث عبر '+data.source_label+' · '+data.count+' نتيجة';
+        const lastMsg=document.getElementById('msgs').lastElementChild;
+        if(lastMsg)lastMsg.appendChild(srcBadge);
+      }
+    }catch(e){fileContext='';}
+  }
+  else{addBubble('user',text);addTyping();}
 
-@app.get("/test")
-async def test_all():
-    results = {}
+  const userContent=fileContext?`${text||'اقرأ هذا'}\n\n[معلومات]\n${fileContext}`:text||'اقرأ هذا الملف';
+  s.msgs.push({role:'user',content:userContent,fi});
+  if(s.msgs.length===1){s.title=(text||fileObj?.name||'محادثة').substring(0,30);document.getElementById('topTitle').textContent=s.title;}
 
-    # 1. edge-tts
-    try:
-        import edge_tts
-        results["edge_tts"] = "✅ متاح"
-    except Exception as e:
-        results["edge_tts"] = f"❌ {str(e)[:60]}"
+  const stats=JSON.parse(localStorage.getItem('gq_stats')||'{"msgs":0,"files":0,"searches":0}');
+  stats.msgs++;if(fileObj)stats.files++;if(fileContext&&!fileObj)stats.searches++;
+  localStorage.setItem('gq_stats',JSON.stringify(stats));
 
-    # 2. DuckDuckGo Search
-    try:
-        from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
-            r = list(ddgs.text("اختبار", max_results=1))
-        results["duckduckgo"] = f"✅ يعمل — {r[0]['title'][:40] if r else 'لا نتائج'}"
-    except Exception as e:
-        results["duckduckgo"] = f"❌ {str(e)[:80]}"
+  try{
+    const apiMsgs=s.msgs.map(m=>({role:m.role,content:m.content}));
+    const res=await fetchWithRetry(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:apiMsgs,model})});
+    const data=await res.json();
+    removeTyping();
+    s.msgs.push({role:'assistant',content:data.reply});
+    s.model=model;save();renderSB();
+    addBubble('assistant',data.reply);
+    if(voiceMode)await autoSpeak(data.reply);
+  }catch(err){
+    removeTyping();s.msgs.pop();save();
+    toast('⚠ تعذّر الاتصال بالخادم');
+    if(voiceMode){
+      const orb=document.getElementById('voOrb');
+      orb.className='vo-orb';orb.textContent='🎤';
+      document.getElementById('voWaves').className='vo-waves';
+    }
+  }
+  busy=false;document.getElementById('sendBtn').disabled=false;
+  if(!forcedText)document.getElementById('ti').focus();
+}
 
-    # 3. YouTube Transcript
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        ytt=YouTubeTranscriptApi(); fetched=ytt.fetch("YQHsXMglC9A",languages=["ar","en"]); raw=fetched.to_raw_data()
-        results["youtube_transcript"] = f"✅ يعمل — {len(raw)} جملة"
-    except Exception as e:
-        results["youtube_transcript"] = f"❌ {str(e)[:80]}"
+// ══ VOICE MODE ══
+function openVoiceMode(){
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
+  if(recOn){try{micRec&&micRec.stop();}catch(e){}recOn=false;document.getElementById('micBtn').classList.remove('rec');}
+  voiceMode=true;botSpeaking=false;
+  document.getElementById('voiceOverlay').classList.add('show');
+  document.getElementById('voiceModeBtn').classList.add('active');
+  setTimeout(()=>startVoiceListen(),600);
+}
 
-    # 4. Scrapy
-    try:
-        import scrapy
-        results["scrapy"] = f"✅ متاح — v{scrapy.__version__}"
-    except Exception as e:
-        results["scrapy"] = f"❌ {str(e)[:60]}"
+function closeVoiceMode(){
+  voiceMode=false;botSpeaking=false;
+  ++speakSession;
+  clearTimeout(silenceTimer);
+  stopVoiceListen();
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
+  document.getElementById('voiceOverlay').classList.remove('show');
+  document.getElementById('voiceModeBtn').classList.remove('active');
+  const orb=document.getElementById('voOrb');
+  orb.className='vo-orb';orb.textContent='🎤';
+  document.getElementById('voWaves').className='vo-waves';
+  document.getElementById('voStatus').textContent='اضغط الكرة للبدء';
+  document.getElementById('voTranscript').textContent='سيظهر هنا ما تقوله...';
+}
 
-    # 5. BeautifulSoup + httpx
-    try:
-        import httpx
-        from bs4 import BeautifulSoup
-        async with httpx.AsyncClient(timeout=8, verify=False) as c:
-            resp = await c.get("https://example.com")
-        soup = BeautifulSoup(resp.text, "html.parser")
-        title = soup.find("title").text if soup.find("title") else "لا عنوان"
-        results["beautifulsoup_httpx"] = f"✅ يعمل — {title[:40]}"
-    except Exception as e:
-        results["beautifulsoup_httpx"] = f"❌ {str(e)[:80]}"
+function stopVoiceListen(){
+  voiceListening=false;
+  clearTimeout(silenceTimer);
+  finalTranscript='';
+  if(voiceRec){try{voiceRec.stop();}catch(e){}voiceRec=null;}
+}
 
-    # 6. pdfplumber
-    try:
-        import pdfplumber
-        results["pdfplumber"] = "✅ متاح"
-    except Exception as e:
-        results["pdfplumber"] = f"❌ {str(e)[:60]}"
+function startVoiceListen(){
+  if(!voiceMode||busy||voiceListening||botSpeaking)return;
+  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('المتصفح لا يدعم الصوت');return;}
+  const orb=document.getElementById('voOrb');
+  const waves=document.getElementById('voWaves');
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  voiceRec=new SR();
+  voiceRec.lang='ar-SA';
+  voiceRec.interimResults=true;
+  voiceRec.continuous=false; // false لمنع التكرار
+  voiceRec.maxAlternatives=1;
+  finalTranscript='';
 
-    # 7. pandas + numpy
-    try:
-        import pandas as pd
-        import numpy as np
-        results["pandas_numpy"] = f"✅ pandas {pd.__version__} / numpy {np.__version__}"
-    except Exception as e:
-        results["pandas_numpy"] = f"❌ {str(e)[:60]}"
+  voiceRec.onstart=()=>{
+    voiceListening=true;finalTranscript='';
+    orb.className='vo-orb listening';orb.textContent='👂';
+    waves.className='vo-waves listening';
+    document.getElementById('voStatus').textContent='أنا أستمع...';
+    document.getElementById('voTranscript').textContent='';
+  };
 
-    # 8. Groq API
-    try:
-        r = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role":"user","content":"قل: اختبار ناجح"}],
-            max_tokens=10
-        )
-        results["groq_api"] = f"✅ {r.choices[0].message.content}"
-    except Exception as e:
-        results["groq_api"] = f"❌ {str(e)[:80]}"
+  voiceRec.onresult=e=>{
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal)finalTranscript+=e.results[i][0].transcript;
+      else interim+=e.results[i][0].transcript;
+    }
+    document.getElementById('voTranscript').textContent=finalTranscript||interim;
+    clearTimeout(silenceTimer);
+    if(finalTranscript){
+      silenceTimer=setTimeout(()=>{
+        const msg=finalTranscript.trim();
+        if(msg&&!botSpeaking){
+          finalTranscript='';
+          try{voiceRec.stop();}catch(ex){}
+          sendVoiceMsg(msg);
+        }
+      },2000);
+    }
+  };
 
-    return {"platform": "railway", "tests": results}
+  voiceRec.onend=()=>{
+    voiceListening=false;
+    clearTimeout(silenceTimer);
+    waves.className='vo-waves';
+    if(finalTranscript.trim()&&!botSpeaking&&!busy){
+      const msg=finalTranscript.trim();finalTranscript='';
+      sendVoiceMsg(msg);return;
+    }
+    // أعد الاستماع إذا لم يكن البوت يتحدث
+    if(voiceMode&&!busy&&!botSpeaking){
+      orb.className='vo-orb';orb.textContent='🎤';
+      document.getElementById('voStatus').textContent='أنا أستمع...';
+      setTimeout(()=>{if(voiceMode&&!busy&&!botSpeaking)startVoiceListen();},400);
+    }
+  };
 
-@app.get("/test-tts")
-async def test_tts():
-    """تشخيص مشكلة TTS — افتح هذا الرابط لمعرفة السبب الحقيقي"""
-    info = {}
-    
-    # تحقق من edge_tts
-    try:
-        import edge_tts
-        info["edge_tts_import"] = "✅ متاح"
-        
-        # جرب توليد صوت حقيقي
-        try:
-            communicate = edge_tts.Communicate("مرحبا", "ar-SA-ZariyahNeural")
-            audio_buf = io.BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_buf.write(chunk["data"])
-            size = len(audio_buf.getvalue())
-            info["edge_tts_generate"] = f"✅ نجح — {size} bytes"
-        except Exception as e:
-            info["edge_tts_generate"] = f"❌ فشل: {str(e)}"
-            
-        # جرب صوت مصري
-        try:
-            communicate2 = edge_tts.Communicate("مرحبا", "ar-EG-SalmaNeural")
-            audio_buf2 = io.BytesIO()
-            async for chunk in communicate2.stream():
-                if chunk["type"] == "audio":
-                    audio_buf2.write(chunk["data"])
-            size2 = len(audio_buf2.getvalue())
-            info["edge_tts_egypt"] = f"✅ نجح — {size2} bytes"
-        except Exception as e:
-            info["edge_tts_egypt"] = f"❌ فشل: {str(e)}"
-            
-    except Exception as e:
-        info["edge_tts_import"] = f"❌ {str(e)}"
+  voiceRec.onerror=e=>{
+    voiceListening=false;finalTranscript='';
+    waves.className='vo-waves';
+    clearTimeout(silenceTimer);
+    if(e.error==='no-speech'&&voiceMode&&!busy&&!botSpeaking){
+      setTimeout(()=>{if(voiceMode&&!busy&&!botSpeaking)startVoiceListen();},400);
+    } else if(e.error!=='aborted'){
+      orb.className='vo-orb';orb.textContent='🎤';
+      document.getElementById('voStatus').textContent='خطأ: '+e.error;
+    }
+  };
 
-    # تحقق من gTTS
-    try:
-        from gtts import gTTS
-        tts = gTTS(text="مرحبا", lang="ar", slow=False)
-        buf = io.BytesIO()
-        tts.write_to_fp(buf)
-        info["gtts"] = f"✅ نجح — {len(buf.getvalue())} bytes"
-    except Exception as e:
-        info["gtts"] = f"❌ {str(e)}"
+  voiceRec.start();
+}
 
-    return info
+function orbTap(){
+  if(botSpeaking){interruptBot();return;}   // كلام → اقطع
+  if(voiceListening){stopVoiceListen();return;} // استماع → أوقف
+  startVoiceListen();                        // صامت → استمع
+}
+function toggleVoiceListen(){
+  if(voiceListening||botSpeaking){stopVoiceListen();return;}
+  startVoiceListen();
+}
 
-app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
+async function sendVoiceMsg(text){
+  if(!text.trim()||busy||botSpeaking)return;
+  stopVoiceListen();
+  const orb=document.getElementById('voOrb');
+  orb.className='vo-orb';orb.textContent='⏳';
+  document.getElementById('voWaves').className='vo-waves';
+  document.getElementById('voStatus').textContent='جاري المعالجة...';
+  document.getElementById('voTranscript').textContent=text;
+  if(!aid)newChat();
+  await send(text);
+}
+
+// ══ MIC للكتابة — منفصل تماماً ══
+function toggleMic(){
+  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('المتصفح لا يدعم الميكروفون');return;}
+  const btn=document.getElementById('micBtn');
+  if(recOn){try{micRec&&micRec.stop();}catch(e){}recOn=false;btn.classList.remove('rec');return;}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  micRec=new SR();micRec.lang='ar-SA';micRec.interimResults=false;micRec.continuous=false;
+  micRec.onresult=e=>{
+    const ti=document.getElementById('ti');
+    ti.value+=e.results[0][0].transcript+' ';resize(ti);ti.focus();
+  };
+  micRec.onend=()=>{recOn=false;btn.classList.remove('rec');};
+  micRec.onerror=()=>{recOn=false;btn.classList.remove('rec');toast('تعذّر الوصول للميكروفون');};
+  micRec.start();recOn=true;btn.classList.add('rec');
+  toast('🎤 تحدث الآن — سيُكتب في مربع النص');
+}
+
+function onFile(e){
+  const f=e.target.files[0];if(!f)return;pFile=f;
+  document.getElementById('fileIcon').textContent=fIcon(f.name);
+  document.getElementById('fileName').textContent=f.name;
+  document.getElementById('fileSize').textContent=fmtSize(f.size);
+  document.getElementById('fileBar').classList.add('show');e.target.value='';
+}
+function removeFile(){pFile=null;document.getElementById('fileBar').classList.remove('show');}
+function suggest(el){const ti=document.getElementById('ti');ti.value=el.textContent;resize(ti);ti.focus();}
+function copyMsg(btn){const t=btn.closest('.bwrap').querySelector('.bubble span');if(t)navigator.clipboard.writeText(t.innerText).then(()=>toast('✓ تم النسخ'));}
+function resize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,140)+'px';}
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200);}
+function esc(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function onModelChange(){const v=document.getElementById('modelSel').value;if(aid){gs(aid).model=v;save();}document.getElementById('topSub').textContent='groq · '+v.split('-').slice(0,2).join('-');}
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeVoiceMode();});
+init();
+</script>
+</body>
+</html>
