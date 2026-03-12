@@ -28,7 +28,11 @@ try:
 except:
     EDGE_TTS_AVAILABLE = False
 
-from gtts import gTTS
+try:
+    from gtts import gTTS
+    GTTS_AVAILABLE = True
+except:
+    GTTS_AVAILABLE = False
 
 try:
     import pytesseract
@@ -421,75 +425,46 @@ async def scrape(req: ScrapeRequest):
 @app.post("/api/tts")
 async def tts(req: TTSRequest):
     from fastapi.responses import Response
-    import logging
     text = req.text[:800]
     speed = max(0.5, min(2.0, req.speed))
     selected_voice = req.voice if req.voice in VALID_VOICES else "ar-SA-ZariyahNeural"
-
-    # حساب rate كـ string لـ edge-tts
     rate_percent = int((speed - 1.0) * 100)
     rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-
     CORS_HEADERS = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "*",
-        "Cache-Control": "no-cache",
     }
 
-    # ══ المحاولة 1: edge-tts بالصوت المختار ══
+    # المحاولة 1: edge-tts بالصوت المختار
     if EDGE_TTS_AVAILABLE:
-        try:
-            communicate = edge_tts.Communicate(text, selected_voice, rate=rate_str)
-            audio_buf = io.BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_buf.write(chunk["data"])
-            audio_bytes = audio_buf.getvalue()
-            if len(audio_bytes) > 100:
-                return Response(
-                    content=audio_bytes,
-                    media_type="audio/mpeg",
-                    headers=CORS_HEADERS
-                )
-        except Exception as e1:
-            logging.warning(f"edge-tts voice {selected_voice} failed: {e1}")
-            # محاولة بالصوت الافتراضي
+        for voice in [selected_voice, "ar-SA-ZariyahNeural"]:
             try:
-                communicate = edge_tts.Communicate(text, "ar-SA-ZariyahNeural", rate=rate_str)
+                communicate = edge_tts.Communicate(text, voice, rate=rate_str)
                 audio_buf = io.BytesIO()
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
                         audio_buf.write(chunk["data"])
                 audio_bytes = audio_buf.getvalue()
-                if len(audio_bytes) > 100:
-                    return Response(
-                        content=audio_bytes,
-                        media_type="audio/mpeg",
-                        headers=CORS_HEADERS
-                    )
-            except Exception as e2:
-                logging.warning(f"edge-tts default also failed: {e2}")
+                if len(audio_bytes) > 500:
+                    return Response(content=audio_bytes, media_type="audio/mpeg", headers=CORS_HEADERS)
+            except:
+                continue
 
-    # ══ المحاولة 2: gTTS fallback ══
-    try:
-        tts_obj = gTTS(text=text, lang="ar", slow=False)
-        audio_buf = io.BytesIO()
-        tts_obj.write_to_fp(audio_buf)
-        audio_buf.seek(0)
-        return Response(
-            content=audio_buf.read(),
-            media_type="audio/mpeg",
-            headers=CORS_HEADERS
-        )
-    except Exception as e3:
-        logging.error(f"gTTS also failed: {e3}")
-        return Response(
-            content=b"",
-            status_code=500,
-            media_type="application/json",
-            headers=CORS_HEADERS
-        )
+    # المحاولة 2: gTTS
+    if GTTS_AVAILABLE:
+        try:
+            tts_obj = gTTS(text=text, lang="ar", slow=False)
+            audio_buf = io.BytesIO()
+            tts_obj.write_to_fp(audio_buf)
+            audio_buf.seek(0)
+            audio_bytes = audio_buf.read()
+            if len(audio_bytes) > 500:
+                return Response(content=audio_bytes, media_type="audio/mpeg", headers=CORS_HEADERS)
+        except:
+            pass
+
+    return Response(content=b"", status_code=500, headers=CORS_HEADERS)
 
 @app.get("/health")
 def health():
