@@ -421,52 +421,75 @@ async def scrape(req: ScrapeRequest):
 @app.post("/api/tts")
 async def tts(req: TTSRequest):
     from fastapi.responses import Response
-    text = req.text[:600]
+    import logging
+    text = req.text[:800]
     speed = max(0.5, min(2.0, req.speed))
+    selected_voice = req.voice if req.voice in VALID_VOICES else "ar-SA-ZariyahNeural"
 
+    # حساب rate كـ string لـ edge-tts
+    rate_percent = int((speed - 1.0) * 100)
+    rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
+
+    CORS_HEADERS = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Cache-Control": "no-cache",
+    }
+
+    # ══ المحاولة 1: edge-tts بالصوت المختار ══
     if EDGE_TTS_AVAILABLE:
         try:
-            rate_percent = int((speed - 1.0) * 100)
-            rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-            selected_voice = req.voice if req.voice in VALID_VOICES else "ar-SA-ZariyahNeural"
             communicate = edge_tts.Communicate(text, selected_voice, rate=rate_str)
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            await communicate.save(tmp.name)
-            with open(tmp.name, "rb") as f:
-                audio_bytes = f.read()
-            os.unlink(tmp.name)
-            return Response(
-                content=audio_bytes,
-                media_type="audio/mpeg",
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "*",
-                    "Content-Disposition": "inline; filename=reply.mp3"
-                }
-            )
-        except Exception as e:
-            pass
+            audio_buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_buf.write(chunk["data"])
+            audio_bytes = audio_buf.getvalue()
+            if len(audio_bytes) > 100:
+                return Response(
+                    content=audio_bytes,
+                    media_type="audio/mpeg",
+                    headers=CORS_HEADERS
+                )
+        except Exception as e1:
+            logging.warning(f"edge-tts voice {selected_voice} failed: {e1}")
+            # محاولة بالصوت الافتراضي
+            try:
+                communicate = edge_tts.Communicate(text, "ar-SA-ZariyahNeural", rate=rate_str)
+                audio_buf = io.BytesIO()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_buf.write(chunk["data"])
+                audio_bytes = audio_buf.getvalue()
+                if len(audio_bytes) > 100:
+                    return Response(
+                        content=audio_bytes,
+                        media_type="audio/mpeg",
+                        headers=CORS_HEADERS
+                    )
+            except Exception as e2:
+                logging.warning(f"edge-tts default also failed: {e2}")
 
+    # ══ المحاولة 2: gTTS fallback ══
     try:
-        tts_obj = gTTS(text=text, lang=req.lang, slow=(speed < 0.8))
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tts_obj.save(tmp.name)
-        with open(tmp.name, "rb") as f:
-            audio_bytes = f.read()
-        os.unlink(tmp.name)
+        tts_obj = gTTS(text=text, lang="ar", slow=False)
+        audio_buf = io.BytesIO()
+        tts_obj.write_to_fp(audio_buf)
+        audio_buf.seek(0)
         return Response(
-            content=audio_bytes,
+            content=audio_buf.read(),
             media_type="audio/mpeg",
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "*",
-                "Content-Disposition": "inline; filename=reply.mp3"
-            }
+            headers=CORS_HEADERS
         )
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as e3:
+        logging.error(f"gTTS also failed: {e3}")
+        return Response(
+            content=b"",
+            status_code=500,
+            media_type="application/json",
+            headers=CORS_HEADERS
+        )
 
 @app.get("/health")
 def health():
