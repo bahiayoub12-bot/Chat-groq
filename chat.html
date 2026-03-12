@@ -121,6 +121,13 @@ input#speedSlider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
   width:30px;height:30px;color:var(--mu);cursor:pointer;font-size:13px;
   display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
 .icon-btn:hover{background:var(--s2);color:var(--tx);}
+.voice-select-wrap{display:flex;align-items:center;gap:5px;background:rgba(0,229,176,0.06);
+  border:1px solid rgba(0,229,176,0.15);border-radius:8px;padding:3px 8px;}
+.voice-select-lbl{font-size:0.6rem;color:var(--mu);}
+select#voiceSel{background:transparent;border:none;color:var(--grn);
+  font-family:'Tajawal',sans-serif;font-size:0.72rem;font-weight:600;
+  cursor:pointer;outline:none;max-width:100px;}
+select#voiceSel option{background:#111525;color:var(--tx);}
 
 /* ══ VOICE OVERLAY — تصميم جديد ══ */
 #voiceOverlay{display:none;position:fixed;inset:0;z-index:200;
@@ -208,14 +215,7 @@ input#voSpeedSlider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
   font-size:0.86rem;cursor:pointer;transition:all 0.2s;z-index:1;}
 .vo-close:hover{background:rgba(255,107,107,0.15);}
 
-/* قائمة اللهجات */
-.voice-select-wrap{display:flex;align-items:center;gap:6px;background:rgba(0,229,176,0.06);
-  border:1px solid rgba(0,229,176,0.15);border-radius:8px;padding:4px 8px;}
-.voice-select-lbl{font-size:0.57rem;color:var(--mu);font-family:'JetBrains Mono',monospace;white-space:nowrap;}
-select#voiceSel{background:transparent;border:none;color:var(--grn);
-  font-family:'Tajawal',sans-serif;font-size:0.72rem;font-weight:600;
-  cursor:pointer;outline:none;padding:2px 4px;direction:rtl;}
-select#voiceSel option{background:var(--s2);color:var(--tx);}
+
 
 /* MESSAGES */
 #msgs{flex:1;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:16px;min-height:0;}
@@ -403,7 +403,7 @@ input[type=file]{display:none;}
       </div>
       <div class="voice-select-wrap">
         <span class="voice-select-lbl">🌍</span>
-        <select id="voiceSel" onchange="onVoiceChange(this.value)" title="اللهجة">
+        <select id="voiceSel" onchange="onVoiceChange(this.value)">
           <option value="ar-SA-ZariyahNeural">🇸🇦 سعودي ♀</option>
           <option value="ar-SA-HamedNeural">🇸🇦 سعودي ♂</option>
           <option value="ar-EG-SalmaNeural">🇪🇬 مصري ♀</option>
@@ -411,13 +411,8 @@ input[type=file]{display:none;}
           <option value="ar-DZ-AminaNeural">🇩🇿 جزائري ♀</option>
           <option value="ar-DZ-IsmaelNeural">🇩🇿 جزائري ♂</option>
           <option value="ar-AE-FatimaNeural">🇦🇪 إماراتي ♀</option>
-          <option value="ar-AE-HamdanNeural">🇦🇪 إماراتي ♂</option>
           <option value="ar-MA-MounaNeural">🇲🇦 مغربي ♀</option>
-          <option value="ar-MA-JamalNeural">🇲🇦 مغربي ♂</option>
           <option value="ar-IQ-RanaNeural">🇮🇶 عراقي ♀</option>
-          <option value="ar-IQ-BasselNeural">🇮🇶 عراقي ♂</option>
-          <option value="ar-LY-ImanNeural">🇱🇾 ليبي ♀</option>
-          <option value="ar-TN-HediNeural">🇹🇳 تونسي ♂</option>
           <option value="ar-KW-FahedNeural">🇰🇼 كويتي ♂</option>
           <option value="ar-SY-AmanyNeural">🇸🇾 سوري ♀</option>
         </select>
@@ -542,6 +537,7 @@ function onVoiceChange(v){
   ttsVoice=v;
   toast('🎙 تم تغيير الصوت: '+document.getElementById('voiceSel').selectedOptions[0].text);
 }
+function onVoiceChange(v){ttsVoice=v;toast('🎙 '+document.getElementById('voiceSel').selectedOptions[0].text);}
 function gs(id){return sessions.find(s=>s.id===id);}
 function save(){localStorage.setItem('gq',JSON.stringify(sessions));}
 
