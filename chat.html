@@ -453,7 +453,7 @@ input[type=file]{display:none;}
     <div class="vo-orb-ring vo-orb-ring-1"></div>
     <div class="vo-orb-ring vo-orb-ring-2"></div>
     <div class="vo-orb-ring vo-orb-ring-3"></div>
-    <div class="vo-orb" id="voOrb" onclick="toggleVoiceListen()">🎤</div>
+    <div class="vo-orb" id="voOrb" onclick="orbTap()">🎤</div>
   </div>
   <div class="vo-waves" id="voWaves">
     <div class="vo-bar"></div><div class="vo-bar"></div><div class="vo-bar"></div>
@@ -634,8 +634,9 @@ function formatText(t){
     .replace(/\n/g,'<br>');
 }
 
-// ══ TTS — دفعات مع منع الاستماع أثناء الكلام ══
-function splitToChunks(text,maxLen=250){
+// ══ TTS ENGINE — VAD + Streaming Chunks + Interrupt ══
+function splitToChunks(text,maxLen=180){
+  // جمل قصيرة للـ streaming السريع
   const sentences=text.match(/[^.!?،؟\n]+[.!?،؟\n]*/g)||[text];
   const chunks=[];let cur='';
   for(const s of sentences){
@@ -643,24 +644,97 @@ function splitToChunks(text,maxLen=250){
     else cur+=s;
   }
   if(cur.trim())chunks.push(cur.trim());
-  return chunks.filter(c=>c.length>0);
+  return chunks.filter(c=>c.trim().length>2);
 }
 
 async function fetchWithRetry(url,opts,retries=2){
   for(let i=0;i<=retries;i++){
     try{const res=await fetch(url,opts);if(res.ok)return res;throw new Error('HTTP '+res.status);}
-    catch(e){if(i===retries)throw e;toast('⟳ جاري إعادة الاتصال...');await new Promise(r=>setTimeout(r,1500));}
+    catch(e){if(i===retries)throw e;toast('⟳ إعادة الاتصال...');await new Promise(r=>setTimeout(r,1500));}
   }
 }
+
+// ═══ VAD — Voice Activity Detection ═══
+let vadCtx=null, vadAnalyser=null, vadStream=null, vadActive=false, vadTimer=null;
+const VAD_THRESHOLD=18; // حساسية الميكروفون (0-255)
+const VAD_HOLD_MS=400;  // وقت الانتظار قبل المقاطعة
+
+async function startVAD(){
+  if(vadActive||!voiceMode)return;
+  try{
+    vadStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    vadCtx=new(window.AudioContext||window.webkitAudioContext)();
+    const src=vadCtx.createMediaStreamSource(vadStream);
+    vadAnalyser=vadCtx.createAnalyser();
+    vadAnalyser.fftSize=512;
+    src.connect(vadAnalyser);
+    vadActive=true;
+    vadLoop();
+  }catch(e){console.warn('VAD failed',e);}
+}
+
+function vadLoop(){
+  if(!vadActive)return;
+  const buf=new Uint8Array(vadAnalyser.frequencyBinCount);
+  const check=()=>{
+    if(!vadActive)return;
+    vadAnalyser.getByteFrequencyData(buf);
+    // متوسط طاقة الصوت
+    const avg=buf.slice(0,80).reduce((a,b)=>a+b,0)/80;
+    if(avg>VAD_THRESHOLD&&botSpeaking){
+      // صوت المستخدم أثناء كلام البوت → اقطع فوراً
+      clearTimeout(vadTimer);
+      vadTimer=setTimeout(()=>{
+        if(avg>VAD_THRESHOLD&&botSpeaking)interruptBot();
+      },VAD_HOLD_MS);
+    }
+    requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
+}
+
+function stopVAD(){
+  vadActive=false;
+  clearTimeout(vadTimer);
+  if(vadStream)vadStream.getTracks().forEach(t=>t.stop());
+  if(vadCtx)vadCtx.close().catch(()=>{});
+  vadCtx=null;vadAnalyser=null;vadStream=null;
+}
+
+function interruptBot(){
+  if(!botSpeaking)return;
+  // قطع الصوت فوراً
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
+  botSpeaking=false;
+  speakInterrupted=true;
+  const orb=document.getElementById('voOrb');
+  const waves=document.getElementById('voWaves');
+  if(voiceMode){
+    orb.className='vo-orb listening';orb.textContent='👂';
+    waves.className='vo-waves listening';
+    document.getElementById('voStatus').textContent='أنا أستمع...';
+  }
+  // ابدأ الاستماع بعد لحظة
+  setTimeout(()=>{
+    speakInterrupted=false;
+    if(voiceMode&&!busy)startVoiceListen();
+  },300);
+}
+
+// ═══ autoSpeak — streaming بالجمل ═══
+let speakSession=0; // لتتبع جلسة الكلام الحالية
+let speakInterrupted=false;
 
 async function autoSpeak(text){
   const clean=cleanText(text);if(!clean)return;
   const chunks=splitToChunks(clean);
-  if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
 
-  // ← أوقف الاستماع أثناء الكلام تماماً
+  // أوقف أي صوت سابق
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   botSpeaking=true;
+  speakInterrupted=false;
   stopVoiceListen();
+  const mySession=++speakSession;
 
   const orb=document.getElementById('voOrb');
   const waves=document.getElementById('voWaves');
@@ -672,34 +746,48 @@ async function autoSpeak(text){
     toast('🔊 جاري التشغيل...');
   }
 
+  // جلب وتشغيل بالترتيب — streaming
   try{
-    for(const chunk of chunks){
-      if(!botSpeaking)break;
-      const res=await fetchWithRetry(TTS,{
+    for(let i=0;i<chunks.length;i++){
+      // توقف إذا قُطع أو تغيرت الجلسة
+      if(!botSpeaking||mySession!==speakSession||speakInterrupted)break;
+
+      // جلب الصوت بدون انتظار الكل
+      const res=await fetch(TTS,{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:chunk,speed:ttsSpeed})
+        body:JSON.stringify({text:chunks[i],speed:ttsSpeed})
       });
+      if(!res.ok||!botSpeaking||mySession!==speakSession)break;
+
       const blob=await res.blob();
-      const audio=new Audio(URL.createObjectURL(blob));
+      if(!botSpeaking||mySession!==speakSession)break;
+
+      const url=URL.createObjectURL(blob);
+      const audio=new Audio(url);
       audio.playbackRate=ttsSpeed;
       voiceAudio=audio;
-      await new Promise((resolve)=>{
-        audio.onended=resolve;
-        audio.onerror=resolve;
+
+      // انتظر انتهاء هذه الجملة قبل التالية
+      await new Promise(resolve=>{
+        audio.onended=()=>{URL.revokeObjectURL(url);resolve();};
+        audio.onerror=()=>{URL.revokeObjectURL(url);resolve();};
         audio.play().catch(resolve);
       });
+
       voiceAudio=null;
+      if(!botSpeaking||mySession!==speakSession||speakInterrupted)break;
     }
   }catch(e){}
 
-  botSpeaking=false;
-
-  // بعد انتهاء الكلام — استمع تلقائياً
-  if(voiceMode){
-    orb.className='vo-orb';orb.textContent='🎤';
-    waves.className='vo-waves';
-    document.getElementById('voStatus').textContent='أنا أستمع...';
-    setTimeout(()=>{if(voiceMode&&!busy&&!botSpeaking)startVoiceListen();},800);
+  // انتهى الكلام بشكل طبيعي أو انقطع
+  if(mySession===speakSession){
+    botSpeaking=false;
+    if(voiceMode&&!speakInterrupted){
+      orb.className='vo-orb';orb.textContent='🎤';
+      waves.className='vo-waves';
+      document.getElementById('voStatus').textContent='أنا أستمع...';
+      setTimeout(()=>{if(voiceMode&&!busy&&!botSpeaking)startVoiceListen();},600);
+    }
   }
 }
 
@@ -794,19 +882,23 @@ async function send(forcedText){
 
 // ══ VOICE MODE ══
 function openVoiceMode(){
-  if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   if(recOn){try{micRec&&micRec.stop();}catch(e){}recOn=false;document.getElementById('micBtn').classList.remove('rec');}
-  voiceMode=true;botSpeaking=false;
+  voiceMode=true;botSpeaking=false;speakInterrupted=false;
   document.getElementById('voiceOverlay').classList.add('show');
   document.getElementById('voiceModeBtn').classList.add('active');
+  // ابدأ VAD لكشف صوت المستخدم
+  startVAD();
   setTimeout(()=>startVoiceListen(),700);
 }
 
 function closeVoiceMode(){
-  voiceMode=false;botSpeaking=false;
+  voiceMode=false;botSpeaking=false;speakInterrupted=false;
+  ++speakSession; // إلغاء أي كلام جارٍ
   clearTimeout(silenceTimer);
   stopVoiceListen();
-  if(voiceAudio){voiceAudio.pause();voiceAudio=null;}
+  stopVAD();
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   document.getElementById('voiceOverlay').classList.remove('show');
   document.getElementById('voiceModeBtn').classList.remove('active');
   const orb=document.getElementById('voOrb');
@@ -896,6 +988,14 @@ function startVoiceListen(){
   voiceRec.start();
 }
 
+function orbTap(){
+  // لمس الكرة أثناء الكلام → قطع فوري
+  if(botSpeaking){interruptBot();return;}
+  // لمس الكرة أثناء الاستماع → أوقف
+  if(voiceListening){stopVoiceListen();return;}
+  // غير ذلك → ابدأ الاستماع
+  startVoiceListen();
+}
 function toggleVoiceListen(){
   if(voiceListening||botSpeaking){stopVoiceListen();return;}
   startVoiceListen();
