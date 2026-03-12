@@ -570,4 +570,54 @@ async def test_all():
         results["groq_api"] = f"❌ {str(e)[:80]}"
 
     return {"platform": "railway", "tests": results}
+
+@app.get("/test-tts")
+async def test_tts():
+    """تشخيص مشكلة TTS — افتح هذا الرابط لمعرفة السبب الحقيقي"""
+    info = {}
+    
+    # تحقق من edge_tts
+    try:
+        import edge_tts
+        info["edge_tts_import"] = "✅ متاح"
+        
+        # جرب توليد صوت حقيقي
+        try:
+            communicate = edge_tts.Communicate("مرحبا", "ar-SA-ZariyahNeural")
+            audio_buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_buf.write(chunk["data"])
+            size = len(audio_buf.getvalue())
+            info["edge_tts_generate"] = f"✅ نجح — {size} bytes"
+        except Exception as e:
+            info["edge_tts_generate"] = f"❌ فشل: {str(e)}"
+            
+        # جرب صوت مصري
+        try:
+            communicate2 = edge_tts.Communicate("مرحبا", "ar-EG-SalmaNeural")
+            audio_buf2 = io.BytesIO()
+            async for chunk in communicate2.stream():
+                if chunk["type"] == "audio":
+                    audio_buf2.write(chunk["data"])
+            size2 = len(audio_buf2.getvalue())
+            info["edge_tts_egypt"] = f"✅ نجح — {size2} bytes"
+        except Exception as e:
+            info["edge_tts_egypt"] = f"❌ فشل: {str(e)}"
+            
+    except Exception as e:
+        info["edge_tts_import"] = f"❌ {str(e)}"
+
+    # تحقق من gTTS
+    try:
+        from gtts import gTTS
+        tts = gTTS(text="مرحبا", lang="ar", slow=False)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        info["gtts"] = f"✅ نجح — {len(buf.getvalue())} bytes"
+    except Exception as e:
+        info["gtts"] = f"❌ {str(e)}"
+
+    return info
+
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
