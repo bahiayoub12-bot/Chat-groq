@@ -634,10 +634,9 @@ function formatText(t){
     .replace(/\n/g,'<br>');
 }
 
-// ══ TTS ENGINE — VAD + Streaming Chunks + Interrupt ══
-function splitToChunks(text,maxLen=180){
-  // جمل قصيرة للـ streaming السريع
-  const sentences=text.match(/[^.!?،؟\n]+[.!?،؟\n]*/g)||[text];
+// ══ TTS ENGINE ══
+function splitToChunks(text,maxLen=200){
+  const sentences=text.match(/[^.!?\u060c\u061f\n]+[.!?\u060c\u061f\n]*/g)||[text];
   const chunks=[];let cur='';
   for(const s of sentences){
     if((cur+s).length>maxLen&&cur){chunks.push(cur.trim());cur=s;}
@@ -654,86 +653,28 @@ async function fetchWithRetry(url,opts,retries=2){
   }
 }
 
-// ═══ VAD — Voice Activity Detection ═══
-let vadCtx=null, vadAnalyser=null, vadStream=null, vadActive=false, vadTimer=null;
-const VAD_THRESHOLD=18; // حساسية الميكروفون (0-255)
-const VAD_HOLD_MS=400;  // وقت الانتظار قبل المقاطعة
-
-async function startVAD(){
-  if(vadActive||!voiceMode)return;
-  try{
-    vadStream=await navigator.mediaDevices.getUserMedia({audio:true});
-    vadCtx=new(window.AudioContext||window.webkitAudioContext)();
-    const src=vadCtx.createMediaStreamSource(vadStream);
-    vadAnalyser=vadCtx.createAnalyser();
-    vadAnalyser.fftSize=512;
-    src.connect(vadAnalyser);
-    vadActive=true;
-    vadLoop();
-  }catch(e){console.warn('VAD failed',e);}
-}
-
-function vadLoop(){
-  if(!vadActive)return;
-  const buf=new Uint8Array(vadAnalyser.frequencyBinCount);
-  const check=()=>{
-    if(!vadActive)return;
-    vadAnalyser.getByteFrequencyData(buf);
-    // متوسط طاقة الصوت
-    const avg=buf.slice(0,80).reduce((a,b)=>a+b,0)/80;
-    if(avg>VAD_THRESHOLD&&botSpeaking){
-      // صوت المستخدم أثناء كلام البوت → اقطع فوراً
-      clearTimeout(vadTimer);
-      vadTimer=setTimeout(()=>{
-        if(avg>VAD_THRESHOLD&&botSpeaking)interruptBot();
-      },VAD_HOLD_MS);
-    }
-    requestAnimationFrame(check);
-  };
-  requestAnimationFrame(check);
-}
-
-function stopVAD(){
-  vadActive=false;
-  clearTimeout(vadTimer);
-  if(vadStream)vadStream.getTracks().forEach(t=>t.stop());
-  if(vadCtx)vadCtx.close().catch(()=>{});
-  vadCtx=null;vadAnalyser=null;vadStream=null;
-}
-
+// مقاطعة البوت — تُستدعى من لمس الكرة
 function interruptBot(){
   if(!botSpeaking)return;
-  // قطع الصوت فوراً
-  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   botSpeaking=false;
-  speakInterrupted=true;
+  ++speakSession;
+  if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   const orb=document.getElementById('voOrb');
   const waves=document.getElementById('voWaves');
-  if(voiceMode){
-    orb.className='vo-orb listening';orb.textContent='👂';
-    waves.className='vo-waves listening';
-    document.getElementById('voStatus').textContent='أنا أستمع...';
-  }
-  // ابدأ الاستماع بعد لحظة
-  setTimeout(()=>{
-    speakInterrupted=false;
-    if(voiceMode&&!busy)startVoiceListen();
-  },300);
+  orb.className='vo-orb';orb.textContent='🎤';
+  waves.className='vo-waves';
+  document.getElementById('voStatus').textContent='أنا أستمع...';
+  setTimeout(()=>{if(voiceMode&&!busy)startVoiceListen();},400);
 }
 
-// ═══ autoSpeak — streaming بالجمل ═══
-let speakSession=0; // لتتبع جلسة الكلام الحالية
-let speakInterrupted=false;
+let speakSession=0;
 
 async function autoSpeak(text){
   const clean=cleanText(text);if(!clean)return;
   const chunks=splitToChunks(clean);
-
-  // أوقف أي صوت سابق
   if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
-  botSpeaking=true;
-  speakInterrupted=false;
   stopVoiceListen();
+  botSpeaking=true;
   const mySession=++speakSession;
 
   const orb=document.getElementById('voOrb');
@@ -741,48 +682,37 @@ async function autoSpeak(text){
   if(voiceMode){
     orb.className='vo-orb speaking';orb.textContent='🔊';
     waves.className='vo-waves speaking';
-    document.getElementById('voStatus').textContent='البوت يتحدث...';
+    document.getElementById('voStatus').textContent='البوت يتحدث... (المس الكرة للمقاطعة)';
   } else {
     toast('🔊 جاري التشغيل...');
   }
 
-  // جلب وتشغيل بالترتيب — streaming
   try{
     for(let i=0;i<chunks.length;i++){
-      // توقف إذا قُطع أو تغيرت الجلسة
-      if(!botSpeaking||mySession!==speakSession||speakInterrupted)break;
-
-      // جلب الصوت بدون انتظار الكل
+      if(!botSpeaking||mySession!==speakSession)break;
       const res=await fetch(TTS,{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({text:chunks[i],speed:ttsSpeed})
       });
       if(!res.ok||!botSpeaking||mySession!==speakSession)break;
-
       const blob=await res.blob();
       if(!botSpeaking||mySession!==speakSession)break;
-
       const url=URL.createObjectURL(blob);
       const audio=new Audio(url);
       audio.playbackRate=ttsSpeed;
       voiceAudio=audio;
-
-      // انتظر انتهاء هذه الجملة قبل التالية
       await new Promise(resolve=>{
         audio.onended=()=>{URL.revokeObjectURL(url);resolve();};
         audio.onerror=()=>{URL.revokeObjectURL(url);resolve();};
         audio.play().catch(resolve);
       });
-
       voiceAudio=null;
-      if(!botSpeaking||mySession!==speakSession||speakInterrupted)break;
     }
   }catch(e){}
 
-  // انتهى الكلام بشكل طبيعي أو انقطع
-  if(mySession===speakSession){
+  if(mySession===speakSession&&botSpeaking){
     botSpeaking=false;
-    if(voiceMode&&!speakInterrupted){
+    if(voiceMode){
       orb.className='vo-orb';orb.textContent='🎤';
       waves.className='vo-waves';
       document.getElementById('voStatus').textContent='أنا أستمع...';
@@ -884,20 +814,17 @@ async function send(forcedText){
 function openVoiceMode(){
   if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   if(recOn){try{micRec&&micRec.stop();}catch(e){}recOn=false;document.getElementById('micBtn').classList.remove('rec');}
-  voiceMode=true;botSpeaking=false;speakInterrupted=false;
+  voiceMode=true;botSpeaking=false;
   document.getElementById('voiceOverlay').classList.add('show');
   document.getElementById('voiceModeBtn').classList.add('active');
-  // ابدأ VAD لكشف صوت المستخدم
-  startVAD();
-  setTimeout(()=>startVoiceListen(),700);
+  setTimeout(()=>startVoiceListen(),600);
 }
 
 function closeVoiceMode(){
-  voiceMode=false;botSpeaking=false;speakInterrupted=false;
-  ++speakSession; // إلغاء أي كلام جارٍ
+  voiceMode=false;botSpeaking=false;
+  ++speakSession;
   clearTimeout(silenceTimer);
   stopVoiceListen();
-  stopVAD();
   if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null;}
   document.getElementById('voiceOverlay').classList.remove('show');
   document.getElementById('voiceModeBtn').classList.remove('active');
@@ -937,7 +864,6 @@ function startVoiceListen(){
   };
 
   voiceRec.onresult=e=>{
-    if(botSpeaking){try{voiceRec.stop();}catch(ex){}return;}
     let interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       if(e.results[i].isFinal)finalTranscript+=e.results[i][0].transcript;
@@ -989,12 +915,9 @@ function startVoiceListen(){
 }
 
 function orbTap(){
-  // لمس الكرة أثناء الكلام → قطع فوري
-  if(botSpeaking){interruptBot();return;}
-  // لمس الكرة أثناء الاستماع → أوقف
-  if(voiceListening){stopVoiceListen();return;}
-  // غير ذلك → ابدأ الاستماع
-  startVoiceListen();
+  if(botSpeaking){interruptBot();return;}   // كلام → اقطع
+  if(voiceListening){stopVoiceListen();return;} // استماع → أوقف
+  startVoiceListen();                        // صامت → استمع
 }
 function toggleVoiceListen(){
   if(voiceListening||botSpeaking){stopVoiceListen();return;}
