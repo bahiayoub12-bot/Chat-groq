@@ -148,6 +148,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .time-row{display:flex;justify-content:space-between;}
 .time-txt{font-size:0.6rem;color:var(--mu);font-family:'JetBrains Mono',monospace;}
 
+/* AI CORRECT BTN */
+.ai-btn{width:100%;padding:12px;border-radius:12px;
+  background:rgba(165,107,255,0.07);border:1px solid rgba(165,107,255,0.2);
+  color:var(--a2);font-family:'Tajawal',sans-serif;font-size:0.88rem;font-weight:600;
+  cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}
+.ai-btn:hover:not(:disabled){background:rgba(165,107,255,0.14);border-color:rgba(165,107,255,0.35);transform:translateY(-1px);}
+.ai-btn:disabled{opacity:0.5;cursor:not-allowed;}
+.ai-btn .ai-spinner{width:14px;height:14px;border:2px solid rgba(165,107,255,0.3);
+  border-top-color:var(--a2);border-radius:50%;animation:spin 0.7s linear infinite;display:none;}
+.ai-btn.loading .ai-spinner{display:block;}
+
 /* DOWNLOAD BTN */
 .dl-btn{width:100%;padding:13px;border-radius:12px;margin-top:14px;
   background:rgba(0,229,176,0.07);border:1px solid rgba(0,229,176,0.2);
@@ -206,6 +217,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <span class="char-num" id="charNum">0 / 2000</span>
       <button class="clear-btn" onclick="clearText()">مسح ✕</button>
     </div>
+    <button class="ai-btn" id="aiBtn" onclick="correctText()" style="margin-top:12px;">
+      <div class="ai-spinner"></div>
+      <span>✦ تصحيح نحوي + تشكيل بالذكاء الاصطناعي</span>
+    </button>
   </div>
 
   <!-- الإعدادات -->
@@ -336,6 +351,65 @@ function onSpeed(v){
   document.getElementById('speedVal').textContent = parseFloat(v).toFixed(1) + '×';
   const pct = ((v - 0.5) / 1.5 * 100);
   document.getElementById('speedSlider').style.setProperty('--pct', pct + '%');
+}
+
+// ══ AI Correct ══
+const CHAT_API = 'https://chat-groq-production.up.railway.app/api/chat';
+
+async function correctText(){
+  const ta = document.getElementById('textInput');
+  const text = ta.value.trim();
+  if(!text){ toast('⚠ اكتب نصاً أولاً'); return; }
+
+  const btn = document.getElementById('aiBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.querySelector('span').textContent = 'جاري التصحيح...';
+
+  try{
+    const res = await fetch(CHAT_API, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        messages:[{
+          role: 'system',
+          content: `أنت متخصص في اللغة العربية الفصحى وعلم التجويد والنحو.
+مهمتك: تصحيح النص العربي وتشكيله تشكيلاً كاملاً ودقيقاً ليُقرأ بصوت احترافي.
+
+قواعد صارمة يجب الالتزام بها:
+1. أضف التشكيل الكامل على كل حرف (فتحة، ضمة، كسرة، سكون، شدة، تنوين)
+2. صحح الأخطاء النحوية والإملائية
+3. صحح علامات الترقيم لتناسب التوقف الصوتي الطبيعي
+4. أبقِ على المعنى الأصلي تماماً ولا تغير المحتوى
+5. لا تضف أي شرح أو تعليق — فقط النص المشكّل المصحح
+6. إذا كان النص بالعامية حوّله للفصحى المشكّلة`
+        },{
+          role: 'user',
+          content: `صحح وشكّل هذا النص:
+
+${text}`
+        }],
+        model: 'llama-3.3-70b-versatile'
+      })
+    });
+
+    const data = await res.json();
+    const corrected = data.reply?.trim();
+
+    if(corrected && corrected.length > 0){
+      ta.value = corrected;
+      onInput(ta);
+      toast('✅ تم التصحيح والتشكيل');
+    } else {
+      throw new Error('لم يرجع نص');
+    }
+  } catch(e){
+    toast('❌ فشل التصحيح: ' + e.message);
+  } finally{
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.querySelector('span').textContent = '✦ تصحيح نحوي + تشكيل بالذكاء الاصطناعي';
+  }
 }
 
 // ══ Generate ══
